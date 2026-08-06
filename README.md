@@ -1,8 +1,74 @@
-# Plantilla React Native + TypeScript
+# Cámara PRO (sobre plantilla React Native + TypeScript)
 
-Base para arrancar apps móviles con React Native 0.86 (New Architecture),
-TypeScript estricto y una estructura pensada para crecer sin volverse un
-desorden.
+App de cámara con guías de composición avanzadas y asistentes en tiempo
+real, construida sobre esta plantilla de React Native 0.86 (New
+Architecture) y TypeScript estricto.
+
+---
+
+## La app: Cámara PRO
+
+La cámara abre directo al visor, sin login. El modo normal es mínimo
+(disparador, flash, voltear, galería); el chip **PRO** despliega las
+herramientas avanzadas:
+
+| Herramienta                  | Qué hace                                                                                       |
+| ---------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Guías de composición**     | 3×3 (tercios), Phi (proporción áurea), 4×4, espiral de Fibonacci, triángulos dorados, simetría |
+| **Máscaras de formato**      | 1:1, 4:5, 9:16, 16:9 y 2.39:1 (cine): sombrean lo que queda fuera sin ocultar la escena        |
+| **Nivel giroscópico 2 ejes** | Horizonte artificial con acelerómetro; se pone verde al nivelar (con histéresis anti-parpadeo) |
+| **Disparo automático**       | Dispara solo cuando mantienes el horizonte nivelado ~0.7 s                                     |
+| **Modo fantasma**            | Superpone una foto anterior semitransparente; opcionalmente la funde en la captura             |
+| **Temporizador y zoom**      | 3 s / 10 s con cuenta atrás, zoom continuo                                                     |
+
+Además: galería en cuadrícula de 3 columnas (últimas fotos del carrete),
+visor de foto a pantalla completa con "Usar como fantasma", y guardado
+automático en la galería del sistema.
+
+### Las dos caras del modo fantasma
+
+El fantasma nace como **guía de encuadre** (_onion skinning_): ves la foto
+anterior translúcida sobre el visor para volver a colocar la cámara en el
+mismo sitio, y la foto que disparas sale **limpia**. Es lo que quieres para un
+antes/después: dos tomas idénticas de encuadre, ninguna con la otra encima.
+
+Con el chip **«Fundir en la foto»** del panel PRO, la captura se compone con
+la superposición a la misma opacidad que ves en pantalla, y lo que se guarda
+es la mezcla (doble exposición). El interruptor sólo aparece con el fantasma
+activo y se recuerda entre sesiones.
+
+La mezcla la hace `features/camera/utils/ghostCompose.ts` con Skia, que se
+eligió por ser la única librería de dibujo presente **en los dos runtimes**
+(viene en Expo Go SDK 57 y compila en la build nativa). Se compone sobre los
+píxeles reales de la foto, no sobre lo que se ve en pantalla, así que no se
+pierde resolución. Si la composición falla, se guarda la toma original: nunca
+se pierde la foto.
+
+### Cómo funciona en cada mundo
+
+La app corre **completa** en los dos flujos, con librerías de cámara
+distintas detrás del mismo contrato (`CameraViewport` + `nativeModules.ts`):
+
+| Capacidad          | Expo Go (`npm run go`)     | Build nativa (`npm run android`) |
+| ------------------ | -------------------------- | -------------------------------- |
+| Visor y captura    | expo-camera                | **react-native-vision-camera** 5 |
+| Galería y guardado | expo-media-library         | @react-native-camera-roll        |
+| Nivel (sensores)   | Reanimated (sensor nativo) | Reanimated (sensor nativo)       |
+| Vibración          | expo-haptics               | `Vibration` de React Native      |
+| Fundir el fantasma | Skia + expo-file-system    | Skia + react-native-nitro-image  |
+
+En tiempo de ejecución, `nativeModules.ts` detecta el runtime con
+`global.expo` (sólo existe dentro de Expo Go) y carga el módulo correcto;
+nunca importes paquetes `expo-*`, VisionCamera o CameraRoll directamente.
+En el lado nativo, `react-native.config.js` excluye los paquetes de Expo del
+autolinking de Gradle/CocoaPods.
+
+### Hoja de ruta
+
+Focus peaking, patrón zebra e histograma en tiempo real necesitan acceso a
+los fotogramas del preview (frame processors de VisionCamera). Con la
+migración a VisionCamera ya hecha, son el siguiente paso natural; no se
+simulan con datos falsos.
 
 ---
 
@@ -57,6 +123,25 @@ npm run go:clear
 
 La que usarás para publicar y la que no tiene ninguna limitación.
 
+> **Antes de compilar: hace falta JDK 17 o 21, y ninguno más nuevo.**
+>
+> Con JDK 22 o superior la build muere en `JdkImageTransform`, porque el
+> `jlink` de esas versiones no sabe transformar `core-for-system-modules.jar`
+> del SDK de Android. El mensaje no dice nada del JDK, así que es fácil
+> perder una tarde con él.
+>
+> Comprueba cuál tienes con `java -version`. Si es más nuevo, instala un
+> JDK 21 y apunta Gradle a él **sin tocar el resto del sistema**, en
+> `~/.gradle/gradle.properties` (fuera del repo, porque es una ruta local):
+>
+> ```properties
+> org.gradle.java.home=/ruta/a/tu/jdk-21
+> ```
+>
+> También necesitas `ANDROID_HOME` apuntando al SDK y `platform-tools` en el
+> `PATH`; si depuras por cable, `adb reverse tcp:8081 tcp:8081` cada vez que
+> lo reconectas.
+
 ```bash
 npm start            # arranca Metro
 npm run android      # compila y lanza en Android
@@ -86,15 +171,16 @@ src/
 │   └── ErrorBoundary    Captura de errores de render
 ├── config/              Lectura y validación de variables de entorno
 ├── features/            ⭐ El código de negocio vive aquí
-│   ├── auth/
-│   │   ├── hooks/       Lógica con React Query
-│   │   ├── schemas/     Validación con Zod
-│   │   └── screens/
-│   ├── posts/
-│   │   ├── api/         Llamadas HTTP del feature
-│   │   ├── components/  Componentes propios del feature
-│   │   ├── hooks/
-│   │   └── screens/
+│   ├── camera/          ⭐⭐ La app de cámara
+│   │   ├── api/         Lectura del carrete (media library)
+│   │   ├── components/  Visor, HUD, guías, máscaras, nivel, panel PRO
+│   │   ├── constants/   Catálogo de guías, formatos, tolerancias
+│   │   ├── hooks/       Permiso, captura, inclinación, temporizador…
+│   │   ├── screens/     Cámara, Galería, Visor de foto
+│   │   ├── services/    Carga protegida de módulos de Expo
+│   │   └── utils/       Geometría pura (espiral áurea, máscaras, nivel)
+│   ├── auth/            Ejemplo de la plantilla (no montado en la app)
+│   ├── posts/           Ejemplo de la plantilla (no montado en la app)
 │   └── settings/
 ├── hooks/               Hooks genéricos reutilizables
 ├── navigation/          Navegadores, tipos de rutas y deep links
@@ -207,7 +293,7 @@ dispositivo con root o jailbreak se lee con un volcado de archivos.
 Se conecta al store de auth por la opción `storage` de `persist`:
 
 ```ts
-storage: createJSONStorage(() => secureStorage),
+storage: createJSONStorage(() => secureStorage);
 ```
 
 Cada clave se guarda como una entrada independiente del Keychain
@@ -322,8 +408,11 @@ Se usa **native stack** (`@react-navigation/native-stack`), que delega en
 `UINavigationController` en iOS y en Fragments en Android: transiciones y
 gestos corren en el hilo de UI.
 
-El login/logout **no** navega imperativamente: `RootNavigator` monta un árbol
-distinto según el estado de sesión. Eso elimina pantallas huérfanas en el
+En la app de cámara `RootNavigator` monta el visor como pantalla inicial,
+sin login. El flujo de auth del ejemplo (`AuthNavigator` +
+`MainTabNavigator`) sigue en el código como referencia del patrón
+"protected routes": montar un árbol distinto según el estado de sesión en
+lugar de navegar imperativamente, para no dejar pantallas huérfanas en el
 historial.
 
 Para navegar desde fuera de React (interceptores, notificaciones push) usa los
@@ -441,14 +530,20 @@ npm run ios:release
 
 ### Cosas que querrás añadir en un proyecto real
 
-Todas estas rompen la compatibilidad con Expo Go y requieren build nativa:
+Éstas rompen la compatibilidad con Expo Go y requieren build nativa:
 
 - **Imágenes optimizadas**: `expo-image` (caché, blurhash, menos memoria).
   Requiere `npx expo prebuild`. El punto de cambio es
   `src/components/ui/Image.tsx`, un solo archivo.
 - **Iconos**: `react-native-vector-icons` (los tabs usan emoji a propósito).
-- **Animaciones**: `react-native-reanimated`. Anima sólo `transform` y
-  `opacity`, que corren en la GPU.
 - **Tabs nativos**: `react-native-bottom-tabs`.
+
+Éstas funcionan en los dos flujos:
+
 - **Monitoreo**: Sentry o Crashlytics, conectados dentro de `logger.error`.
 - **i18n**: `i18next` + `react-i18next` si necesitas más de un idioma.
+
+Ya instaladas y en uso, no hace falta añadirlas: **Reanimated** (4.5.1, para
+los sensores del nivel; anima sólo `transform` y `opacity`, que corren en la
+GPU) y **Skia** (2.6.2, para fundir el fantasma en la foto). Ambas versiones
+están fijadas a las que trae Expo Go SDK 57: no las subas sin cambiar de SDK.

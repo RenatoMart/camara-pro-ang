@@ -13,18 +13,9 @@ export const linking: LinkingOptions<RootStackParamList> = {
   prefixes: ['camaraproang://', 'https://camaraproang.app'],
   config: {
     screens: {
-      Auth: {
-        screens: {
-          SignIn: 'login',
-        },
-      },
-      Main: {
-        screens: {
-          Feed: 'feed',
-          Settings: 'ajustes',
-        },
-      },
-      PostDetail: 'post/:postId',
+      Camara: '',
+      Galeria: 'galeria',
+      Ajustes: 'ajustes',
     },
   },
 };

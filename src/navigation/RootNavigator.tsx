@@ -8,30 +8,29 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React, { useMemo } from 'react';
 
 import { Loader } from '@/components/ui/Loader';
-import { PostDetailScreen } from '@/features/posts/screens/PostDetailScreen';
-import { useAuthStore } from '@/store/authStore';
+import { CameraScreen } from '@/features/camera/screens/CameraScreen';
+import { GalleryScreen } from '@/features/camera/screens/GalleryScreen';
+import { PhotoViewerScreen } from '@/features/camera/screens/PhotoViewerScreen';
+import { SettingsScreen } from '@/features/settings/screens/SettingsScreen';
 import { useTheme } from '@/theme';
 import { logger } from '@/utils/logger';
 
-import { AuthNavigator } from './AuthNavigator';
 import { linking } from './linking';
-import { MainTabNavigator } from './MainTabNavigator';
 import { navigationRef } from './navigationRef';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 /**
- * Navegador raíz.
+ * Navegador raíz de la app de cámara.
  *
- * Patrón "protected routes": en lugar de navegar imperativamente al hacer
- * login/logout, se monta un árbol distinto según el estado de sesión. Esto
- * elimina pantallas huérfanas en el historial y evita condiciones de carrera.
+ * La cámara es la pantalla inicial, sin login: galería, visor de foto y
+ * ajustes se apilan encima. El flujo de auth del ejemplo de plantilla sigue
+ * en `AuthNavigator`/`MainTabNavigator` por si un proyecto futuro lo
+ * necesita, pero aquí no se monta.
  */
 export function RootNavigator() {
   const theme = useTheme();
-  const status = useAuthStore(state => state.status);
-  const isHydrated = useAuthStore(state => state.isHydrated);
 
   const navigationTheme = useMemo<NavTheme>(() => {
     const base = theme.scheme === 'dark' ? DarkTheme : DefaultTheme;
@@ -47,11 +46,6 @@ export function RootNavigator() {
       },
     };
   }, [theme]);
-
-  // Evita el parpadeo de la pantalla de login mientras se lee el token.
-  if (!isHydrated) {
-    return <Loader fullscreen message="Cargando…" />;
-  }
 
   return (
     <NavigationContainer
@@ -71,28 +65,26 @@ export function RootNavigator() {
           contentStyle: { backgroundColor: theme.colors.background },
         }}
       >
-        {status === 'authenticated' ? (
-          <Stack.Group>
-            <Stack.Screen
-              name="Main"
-              component={MainTabNavigator}
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen
-              name="PostDetail"
-              component={PostDetailScreen}
-              options={({ route }) => ({
-                title: route.params.title ?? 'Publicación',
-              })}
-            />
-          </Stack.Group>
-        ) : (
-          <Stack.Screen
-            name="Auth"
-            component={AuthNavigator}
-            options={{ headerShown: false }}
-          />
-        )}
+        <Stack.Screen
+          name="Camara"
+          component={CameraScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Galeria"
+          component={GalleryScreen}
+          options={{ title: 'Galería' }}
+        />
+        <Stack.Screen
+          name="FotoDetalle"
+          component={PhotoViewerScreen}
+          options={{ headerShown: false, animation: 'fade' }}
+        />
+        <Stack.Screen
+          name="Ajustes"
+          component={SettingsScreen}
+          options={{ title: 'Ajustes' }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

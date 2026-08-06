@@ -44,6 +44,109 @@ jest.mock('react-native-keychain', () => {
   };
 });
 
+// Módulos de Expo de la cámara: stubs mínimos, sin puente nativo.
+jest.mock('expo-camera', () => ({
+  CameraView: require('react-native').View,
+  Camera: {
+    getCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
+    requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  },
+}));
+
+jest.mock('expo-haptics', () => ({
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium' },
+  impactAsync: jest.fn(async () => undefined),
+}));
+
+jest.mock('expo-media-library/legacy', () => ({
+  requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  getPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  saveToLibraryAsync: jest.fn(async () => undefined),
+  getAssetsAsync: jest.fn(async () => ({ assets: [] })),
+  SortBy: { creationTime: 'creationTime' },
+}));
+
+// Cámara nativa (build sin Expo): stubs mínimos.
+jest.mock('react-native-vision-camera', () => ({
+  Camera: require('react-native').View,
+  VisionCamera: {
+    cameraPermissionStatus: 'authorized',
+    requestCameraPermission: jest.fn(async () => true),
+  },
+  usePhotoOutput: jest.fn(() => ({
+    capturePhotoToFile: jest.fn(async () => ({ filePath: '/tmp/foto.jpg' })),
+  })),
+}));
+
+jest.mock('@react-native-camera-roll/camera-roll', () => ({
+  CameraRoll: {
+    saveAsset: jest.fn(async () => undefined),
+    getPhotos: jest.fn(async () => ({ edges: [] })),
+  },
+}));
+
+jest.mock('react-native-nitro-image', () => ({
+  loadImage: jest.fn(async () => ({
+    saveToTemporaryFileAsync: jest.fn(async () => '/tmp/compuesta.jpg'),
+  })),
+}));
+
+// Skia: sólo se ejercita la geometría del fundido, no el dibujo real.
+jest.mock('@shopify/react-native-skia', () => ({
+  ImageFormat: { JPEG: 3, PNG: 4 },
+  Skia: {
+    Data: { fromURI: jest.fn(async () => ({})) },
+    Image: { MakeImageFromEncoded: jest.fn(() => null) },
+    Surface: { MakeOffscreen: jest.fn(() => null) },
+    Paint: jest.fn(() => ({ setAlphaf: jest.fn() })),
+    XYWHRect: jest.fn((x: number, y: number, w: number, h: number) => ({
+      x,
+      y,
+      width: w,
+      height: h,
+    })),
+  },
+}));
+
+// Reanimated: mock oficial + stub del sensor de gravedad.
+jest.mock('react-native-reanimated', () => {
+  const mock = require('react-native-reanimated/mock');
+  return {
+    ...mock,
+    SensorType: { GRAVITY: 3 },
+    useAnimatedSensor: jest.fn(() => ({
+      sensor: { value: { x: 0, y: -1, z: 0 } },
+      isAvailable: false,
+      unregister: jest.fn(),
+    })),
+    useAnimatedReaction: jest.fn(),
+    runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
+  };
+});
+
+// SVG y slider como Views: los tests comprueban comportamiento, no dibujo.
+jest.mock('react-native-svg', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const make = (name: string) => {
+    const Component = (props: Record<string, unknown>) =>
+      React.createElement(View, props);
+    Component.displayName = name;
+    return Component;
+  };
+  return {
+    __esModule: true,
+    default: make('Svg'),
+    Svg: make('Svg'),
+    Circle: make('Circle'),
+    Line: make('Line'),
+    Path: make('Path'),
+    Rect: make('Rect'),
+  };
+});
+
+jest.mock('@react-native-community/slider', () => require('react-native').View);
+
 jest.mock('react-native-gesture-handler', () => {
   const { View } = require('react-native');
   return {

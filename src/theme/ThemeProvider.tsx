@@ -8,7 +8,13 @@ import { useColorScheme } from 'react-native';
 
 import { useSettingsStore, type ThemePreference } from '@/store/settingsStore';
 
-import { darkColors, lightColors, type AppColors } from './colors';
+import {
+  darkColors,
+  hudColors,
+  lightColors,
+  type AppColors,
+  type HudColors,
+} from './colors';
 import {
   duration,
   elevation,
@@ -21,6 +27,8 @@ import {
 export type Theme = {
   scheme: 'light' | 'dark';
   colors: AppColors;
+  /** Paleta del visor de cámara. Siempre oscura, no depende del esquema. */
+  hud: HudColors;
   spacing: typeof spacing;
   radius: typeof radius;
   typography: typeof typography;
@@ -31,6 +39,7 @@ export type Theme = {
 };
 
 const baseTheme = {
+  hud: hudColors,
   spacing,
   radius,
   typography,

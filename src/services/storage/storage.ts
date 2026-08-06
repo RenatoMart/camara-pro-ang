@@ -19,6 +19,7 @@ export const StorageKeys = {
   authToken: '@app/auth-token',
   settings: '@app/settings',
   onboardingSeen: '@app/onboarding-seen',
+  cameraPrefs: '@app/camera-prefs',
 } as const;
 
 export type StorageKey = (typeof StorageKeys)[keyof typeof StorageKeys];

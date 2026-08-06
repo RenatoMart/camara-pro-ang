@@ -18,6 +18,15 @@ export type MainTabParamList = {
 };
 
 export type RootStackParamList = {
+  // — App de cámara —
+  Camara: undefined;
+  Galeria: undefined;
+  FotoDetalle: { uri: string };
+  Ajustes: undefined;
+
+  // — Ejemplo de la plantilla (auth + feed). No está montado en la app de
+  //   cámara, pero se conservan las rutas para que el código de ejemplo
+  //   compile y sirva de referencia. —
   Auth: NavigatorScreenParams<AuthStackParamList>;
   Main: NavigatorScreenParams<MainTabParamList>;
   PostDetail: { postId: number; title?: string };

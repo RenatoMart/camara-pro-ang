@@ -42,6 +42,16 @@ const fontFamily = Platform.select({
   default: 'System',
 });
 
+/**
+ * Monoespaciada del sistema, para datos técnicos que cambian rápido
+ * (ISO, zoom, cuenta atrás): el ancho fijo evita que el layout "salte".
+ */
+const monoFontFamily = Platform.select({
+  ios: 'Menlo',
+  android: 'monospace',
+  default: 'monospace',
+});
+
 /** Variantes tipográficas. Añade aquí antes que estilos ad-hoc. */
 export const typography = {
   displayLg: {
@@ -87,6 +97,24 @@ export const typography = {
     fontWeight: '600',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
+  },
+  monoLg: {
+    fontFamily: monoFontFamily,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '600',
+  },
+  mono: {
+    fontFamily: monoFontFamily,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  monoXs: {
+    fontFamily: monoFontFamily,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '500',
   },
 } satisfies Record<string, TextStyle>;
 

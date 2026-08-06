@@ -84,6 +84,68 @@ export const lightColors: AppColors = {
   transparent: palette.transparent,
 };
 
+/**
+ * Colores del HUD de la cámara.
+ *
+ * El visor es siempre oscuro, independientemente del tema claro/oscuro de la
+ * app: la interfaz debe desaparecer para que mande la imagen. Un solo acento
+ * (amarillo) marca la herramienta activa; verde queda reservado para
+ * "nivelado", rojo para grabación/errores y azul para el foco.
+ */
+export type HudColors = {
+  /** Fondo del visor cuando no hay señal de cámara. */
+  background: string;
+  /** Paneles translúcidos sobre el visor. */
+  glass: string;
+  glassBorder: string;
+  /** Fondo de un chip inactivo. */
+  chip: string;
+
+  text: string;
+  textDim: string;
+
+  /** Herramienta activa / valor seleccionado. */
+  accent: string;
+  onAccent: string;
+  /** Indicadores de foco. */
+  focus: string;
+  /** Horizonte nivelado. */
+  level: string;
+  /** Grabando / error crítico. */
+  recording: string;
+
+  gridLine: string;
+  gridLineStrong: string;
+  /** Sombreado de las máscaras de relación de aspecto. */
+  mask: string;
+
+  shutterRing: string;
+  shutterInner: string;
+};
+
+export const hudColors: HudColors = {
+  background: '#0A0A0C',
+  glass: 'rgba(10, 10, 12, 0.72)',
+  glassBorder: 'rgba(255, 255, 255, 0.14)',
+  chip: 'rgba(255, 255, 255, 0.10)',
+
+  text: '#F4F2ED',
+  textDim: 'rgba(244, 242, 237, 0.64)',
+
+  accent: '#FFD60A',
+  onAccent: '#241E00',
+  focus: '#6CA8FF',
+  level: '#30D97E',
+  recording: '#FF453A',
+
+  gridLine: 'rgba(255, 255, 255, 0.30)',
+  gridLineStrong: 'rgba(255, 255, 255, 0.55)',
+  mask: 'rgba(0, 0, 0, 0.72)',
+
+  shutterRing: 'rgba(255, 255, 255, 0.92)',
+  shutterInner: '#FFFFFF',
+};
+
 export const darkColors: AppColors = {
   background: palette.neutral950,
   surface: palette.neutral900,
