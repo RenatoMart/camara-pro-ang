@@ -66,6 +66,35 @@ yarn-error.log
 # testing
 /coverage
 
+# Variables de entorno: se comparte la plantilla, nunca los valores reales
+.env
+.env.*
+!.env.example
+
+# Editores
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Asistentes de IA (skills, agentes, configuración local).
+# No forman parte de la plantilla: quítalos de aquí si quieres compartirlos.
+.claude/
+.agents/
+.cursor/
+.windsurf/
+.aider*
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+skills-lock.json
+
 # Yarn
 .yarn/*
 !.yarn/patches
