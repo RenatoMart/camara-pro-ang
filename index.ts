@@ -4,13 +4,12 @@
  * `react-native-gesture-handler` debe importarse en la primerísima línea,
  * antes que cualquier otro módulo.
  *
- * Se registra el componente raíz con dos nombres a propósito:
- * - `appName` (de app.json) es el que busca el código nativo en una build
- *   normal de Android/iOS,
- * - `'main'` es el que busca Expo Go.
+ * El componente raíz se registra con el nombre de `app.json`, que es el que
+ * busca el código nativo de Android/iOS al arrancar.
  *
- * Registrar ambos permite usar el mismo proyecto en los dos flujos sin tocar
- * nada.
+ * Ojo: `android/app/build.gradle` apunta `entryFile` a este archivo. El
+ * plugin de React Native asume `index.js`, y sin esa línea la build de
+ * release falla al generar el bundle.
  */
 import 'react-native-gesture-handler';
 
@@ -20,4 +19,3 @@ import { name as appName } from './app.json';
 import App from './src/App';
 
 AppRegistry.registerComponent(appName, () => App);
-AppRegistry.registerComponent('main', () => App);

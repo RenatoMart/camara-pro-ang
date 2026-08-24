@@ -1,20 +1,26 @@
 import Slider from '@react-native-community/slider';
+import { useNavigation } from '@react-navigation/native';
 import React, { memo, useCallback } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
 import { useCameraStore } from '@/store/cameraStore';
 import { makeStyles, useTheme } from '@/theme';
 
-import { ASPECTS, GUIDES, TIMERS } from '../../constants/guides';
+import { GUIDES } from '../../constants/guides';
+import { useGhost } from '../../hooks/useGhost';
 import { HudChip } from '../controls/HudChip';
+import { HudLabeledButton } from '../controls/HudLabeledButton';
 
 /**
- * Bandeja de herramientas PRO.
+ * Bandeja de herramientas del modo PRO.
  *
- * Se despliega sobre la barra inferior cuando el modo PRO está activo:
- * guías de composición, formato, temporizador, nivel, disparo automático,
- * fantasma y zoom. Cada fila scrollea en horizontal para no comprimir chips.
+ * Se despliega sobre la tira de modos al elegir «Pro» y reúne lo que
+ * distingue a esta cámara: las guías de composición (con su modo automático),
+ * el nivel, el disparo al nivelar, el fantasma y el zoom fino.
+ *
+ * El formato y el temporizador no están aquí: viven en la barra superior,
+ * donde se esperan en cualquier cámara y siguen a mano fuera del modo PRO.
  */
 export const ProPanel = memo(function ProPanelBase() {
   const theme = useTheme();
@@ -22,10 +28,9 @@ export const ProPanel = memo(function ProPanelBase() {
 
   const guide = useCameraStore(state => state.guide);
   const setGuide = useCameraStore(state => state.setGuide);
-  const aspect = useCameraStore(state => state.aspect);
-  const setAspect = useCameraStore(state => state.setAspect);
-  const timer = useCameraStore(state => state.timer);
-  const setTimer = useCameraStore(state => state.setTimer);
+  const guideMode = useCameraStore(state => state.guideMode);
+  const toggleGuideMode = useCameraStore(state => state.toggleGuideMode);
+  const suggestedGuide = useCameraStore(state => state.suggestedGuide);
   const levelOn = useCameraStore(state => state.levelOn);
   const toggleLevel = useCameraStore(state => state.toggleLevel);
   const autoShutter = useCameraStore(state => state.autoShutter);
@@ -33,104 +38,105 @@ export const ProPanel = memo(function ProPanelBase() {
   const zoom = useCameraStore(state => state.zoom);
   const setZoom = useCameraStore(state => state.setZoom);
   const ghostUri = useCameraStore(state => state.ghostUri);
-  const setGhost = useCameraStore(state => state.setGhost);
   const ghostOpacity = useCameraStore(state => state.ghostOpacity);
   const setGhostOpacity = useCameraStore(state => state.setGhostOpacity);
   const ghostBurn = useCameraStore(state => state.ghostBurn);
   const toggleGhostBurn = useCameraStore(state => state.toggleGhostBurn);
-  const lastPhotoUri = useCameraStore(state => state.lastPhotoUri);
 
-  // Sin foto que superponer, el chip fantasma no tiene nada que activar.
-  const ghostDisabled = ghostUri === null && lastPhotoUri === null;
+  const ghost = useGhost();
+  const navigation = useNavigation();
 
-  const toggleGhost = useCallback(() => {
-    if (ghostUri) {
-      setGhost(null);
-      return;
-    }
-    if (lastPhotoUri) {
-      setGhost(lastPhotoUri);
-    }
-  }, [ghostUri, lastPhotoUri, setGhost]);
+  // Elegir a mano qué foto se superpone: la galería se abre en modo
+  // selección y vuelve sola al tocar una.
+  const elegirFantasma = useCallback(() => {
+    navigation.navigate('Galeria', { modo: 'fantasma' });
+  }, [navigation]);
 
   return (
     <View style={styles.panel}>
-      <Text variant="monoXs" style={styles.sectionLabel}>
-        GUÍA
-      </Text>
+      {/* Tira de guías: la fila principal del modo PRO — texto suelto, sin
+          caja, igual que la tira de modos de abajo. */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.row}
+        contentContainerStyle={styles.guideRow}
       >
+        <HudChip
+          variant="plain"
+          label="Auto"
+          active={guideMode === 'auto'}
+          onPress={toggleGuideMode}
+          accessibilityLabel="Que el asistente elija la guía según la escena"
+        />
         {GUIDES.map(option => (
           <HudChip
             key={option.kind}
+            variant="plain"
             label={option.label}
-            active={guide === option.kind}
+            // En automático se resalta la que propone el asistente, no la
+            // guardada: así se ve qué está haciendo sin perder tu elección.
+            active={
+              guideMode === 'auto'
+                ? suggestedGuide === option.kind
+                : guide === option.kind
+            }
             onPress={() => setGuide(option.kind)}
           />
         ))}
       </ScrollView>
 
-      <Text variant="monoXs" style={styles.sectionLabel}>
-        FORMATO
+      <Text variant="monoXs" style={styles.hint}>
+        {guideMode === 'auto'
+          ? 'El asistente elige la guía; toca una para volver a manual.'
+          : 'Tú eliges la guía.'}
       </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.row}
-      >
-        {ASPECTS.map(option => (
-          <HudChip
-            key={option.kind}
-            label={option.label}
-            active={aspect === option.kind}
-            onPress={() => setAspect(option.kind)}
-          />
-        ))}
-      </ScrollView>
 
-      <Text variant="monoXs" style={styles.sectionLabel}>
-        HERRAMIENTAS
-      </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.row}
-      >
-        <HudChip
-          label="Nivel"
+      {/* Cada herramienta lleva su nombre: un icono suelto no dice lo que
+          hace, y el del disparo automático llegaba a disparar solo sin que se
+          supiera de dónde salían las fotos. */}
+      <View style={styles.toolsRow}>
+        <HudLabeledButton
           icon="nivel"
+          label="Nivel"
           active={levelOn}
           onPress={toggleLevel}
+          accessibilityLabel="Nivel de horizonte"
         />
-        <HudChip
-          label="Auto-disparo"
+        <HudLabeledButton
           icon="check"
+          label="Auto"
           active={autoShutter}
           onPress={toggleAutoShutter}
-          accessibilityLabel="Disparo automático al nivelar"
+          accessibilityLabel="Disparo automático al nivelar el horizonte"
         />
-        <HudChip
-          label="Fantasma"
+        <HudLabeledButton
           icon="fantasma"
-          active={ghostUri !== null}
-          disabled={ghostDisabled}
-          onPress={toggleGhost}
-          accessibilityLabel="Superposición fantasma de la última foto"
+          label="Fantasma"
+          active={ghost.active}
+          disabled={ghost.busy}
+          onPress={ghost.toggle}
+          accessibilityLabel="Superponer una foto anterior sobre el visor"
         />
-        {TIMERS.map(option => (
-          <HudChip
-            key={option.kind}
-            label={option.label}
-            icon="temporizador"
-            active={timer === option.kind}
-            onPress={() => setTimer(option.kind)}
-            accessibilityLabel={`Temporizador ${option.label}`}
-          />
-        ))}
-      </ScrollView>
+        <HudLabeledButton
+          icon="galeria"
+          label="Elegir"
+          onPress={elegirFantasma}
+          accessibilityLabel="Elegir de la galería qué foto se superpone"
+        />
+      </View>
+
+      {autoShutter ? (
+        <Text variant="monoXs" style={styles.aviso}>
+          Disparo automático: la cámara tomará una foto sola cada vez que
+          niveles el horizonte.
+        </Text>
+      ) : null}
+
+      {ghost.aviso !== null ? (
+        <Text variant="monoXs" style={styles.aviso}>
+          {ghost.aviso}
+        </Text>
+      ) : null}
 
       {ghostUri !== null ? (
         <>
@@ -148,15 +154,9 @@ export const ProPanel = memo(function ProPanelBase() {
               maximumTrackTintColor={theme.hud.chip}
               thumbTintColor={theme.hud.accent}
             />
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.row}
-          >
             <HudChip
-              label="Fundir en la foto"
+              variant="plain"
+              label="Fundir"
               icon="fantasma"
               active={ghostBurn}
               onPress={toggleGhostBurn}
@@ -166,7 +166,7 @@ export const ProPanel = memo(function ProPanelBase() {
                   : 'El fantasma es sólo guía: la foto se guardará limpia'
               }
             />
-          </ScrollView>
+          </View>
 
           <Text variant="monoXs" style={styles.hint}>
             {ghostBurn
@@ -191,26 +191,28 @@ export const ProPanel = memo(function ProPanelBase() {
           thumbTintColor={theme.hud.accent}
         />
       </View>
+
+      <View style={styles.divider} />
     </View>
   );
 });
 
 const useStyles = makeStyles(theme => ({
   panel: {
-    backgroundColor: theme.hud.glass,
-    borderTopWidth: 1,
-    borderColor: theme.hud.glassBorder,
-    paddingVertical: theme.spacing.md,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.sm,
     gap: theme.spacing.sm,
   },
-  sectionLabel: {
-    color: theme.hud.textDim,
-    letterSpacing: 1.2,
+  guideRow: {
+    gap: theme.spacing.lg,
     paddingHorizontal: theme.spacing.lg,
+    alignItems: 'center',
   },
-  row: {
+  toolsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.md,
   },
   sliderRow: {
     flexDirection: 'row',
@@ -227,8 +229,20 @@ const useStyles = makeStyles(theme => ({
     color: theme.hud.textDim,
     paddingHorizontal: theme.spacing.lg,
   },
+  // Los avisos van en ámbar: no son un fallo, pero conviene leerlos.
+  aviso: {
+    color: theme.hud.accent,
+    paddingHorizontal: theme.spacing.lg,
+  },
   slider: {
     flex: 1,
     height: 32,
+  },
+  // Separa las herramientas PRO de la tira de modos que queda debajo.
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.xs,
+    backgroundColor: theme.hud.glassBorder,
   },
 }));

@@ -2,10 +2,7 @@ import { Skia, ImageFormat, type SkImage } from '@shopify/react-native-skia';
 
 import { logger } from '@/utils/logger';
 
-import {
-  getFileSystemModule,
-  getNitroImageModule,
-} from '../services/nativeModules';
+import { loadImage } from '../services/nativeModules';
 
 /**
  * Funde la superposición fantasma dentro de la foto recién capturada.
@@ -16,15 +13,25 @@ import {
  * Skia abre las dos imágenes, dibuja la escena a tamaño completo y encima el
  * fantasma con la misma opacidad que se veía en pantalla.
  *
- * Se usa Skia porque es la única librería de dibujo que existe **en los dos
- * runtimes** (viene en Expo Go SDK 57 y se compila en la build nativa), de
- * modo que la feature no queda coja en `npm run go`. Escribir el archivo
- * resultante sí necesita un módulo distinto en cada mundo, y eso se resuelve
- * en `nativeModules.ts` como el resto de la cámara.
+ * La mezcla se hace sobre los píxeles reales de la foto, no sobre lo que se
+ * ve en pantalla, así que no se pierde resolución. El archivo resultante lo
+ * escribe `nitro-image` en la caché temporal.
  */
 
 /** Calidad JPEG del archivo compuesto (0..100). */
 const JPEG_QUALITY = 92;
+
+/**
+ * Tope de tiempo para fundir el fantasma.
+ *
+ * Decodificar la foto y el fantasma depende de dónde salgan sus archivos: una
+ * imagen del carrete llega como `content://` y su lectura puede quedarse
+ * esperando indefinidamente. Sin este tope, ese cuelgue se llevaba por
+ * delante toda la captura —el disparador se quedaba girando para siempre y la
+ * foto no se guardaba nunca—. Agotado el plazo se guarda la toma limpia, que
+ * siempre es mejor que perderla.
+ */
+const COMPOSE_TIMEOUT_MS = 10_000;
 
 /** Carga un archivo de imagen en memoria como imagen de Skia. */
 async function decode(uri: string): Promise<SkImage | null> {
@@ -58,34 +65,19 @@ export function coverRect(
   };
 }
 
-/** Guarda los bytes JPEG con el módulo que exista en este runtime. */
-async function writeJpeg(image: SkImage): Promise<string | null> {
-  const fileSystem = getFileSystemModule();
-  if (fileSystem) {
-    const base64 = image.encodeToBase64(ImageFormat.JPEG, JPEG_QUALITY);
-    const uri = `${fileSystem.cacheDirectory}fantasma-${Date.now()}.jpg`;
-    await fileSystem.writeAsStringAsync(uri, base64, {
-      encoding: fileSystem.EncodingType.Base64,
-    });
-    return uri;
-  }
-
-  const nitroImage = getNitroImageModule();
-  if (nitroImage) {
-    const bytes = image.encodeToBytes(ImageFormat.JPEG, JPEG_QUALITY);
-    const saved = await nitroImage.loadImage({
-      encodedImageData: {
-        buffer: toArrayBuffer(bytes),
-        width: image.width(),
-        height: image.height(),
-        imageFormat: 'jpg',
-      },
-    });
-    const path = await saved.saveToTemporaryFileAsync('jpg', JPEG_QUALITY);
-    return `file://${path}`;
-  }
-
-  return null;
+/** Escribe los bytes JPEG a un archivo temporal y devuelve su uri. */
+async function writeJpeg(image: SkImage): Promise<string> {
+  const bytes = image.encodeToBytes(ImageFormat.JPEG, JPEG_QUALITY);
+  const saved = await loadImage({
+    encodedImageData: {
+      buffer: toArrayBuffer(bytes),
+      width: image.width(),
+      height: image.height(),
+      imageFormat: 'jpg',
+    },
+  });
+  const path = await saved.saveToTemporaryFileAsync('jpg', JPEG_QUALITY);
+  return `file://${path}`;
 }
 
 /**
@@ -112,6 +104,24 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
  * de perder la captura.
  */
 export async function composeGhost(
+  photoUri: string,
+  ghostUri: string,
+  opacity: number,
+): Promise<string | null> {
+  return Promise.race([
+    compose(photoUri, ghostUri, opacity),
+    new Promise<null>(resolve => {
+      setTimeout(() => {
+        logger.warn(
+          'Fundir el fantasma tardó demasiado; se guarda la foto limpia',
+        );
+        resolve(null);
+      }, COMPOSE_TIMEOUT_MS);
+    }),
+  ]);
+}
+
+async function compose(
   photoUri: string,
   ghostUri: string,
   opacity: number,

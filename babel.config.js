@@ -1,33 +1,16 @@
 /**
  * Configuración de Babel.
  *
- * Se usa `babel-preset-expo` en lugar de `@react-native/babel-preset` porque
- * es un superconjunto: incluye todo lo del preset de React Native y además
- * permite que el proyecto corra en Expo Go. Las builds nativas normales
- * (`npm run android` / `npm run ios`) siguen funcionando igual.
+ * Se usa el preset de React Native. El proyecto no pasa por Expo: se compila
+ * y se depura siempre como build nativa (`npm run android` / `npm run ios`).
  *
  * Nota: los archivos de tooling (babel/metro/jest/eslint) deben permanecer en
  * JavaScript CommonJS porque Metro, Babel y ESLint los cargan con `require()`
  * antes de que exista cualquier transpilación de TypeScript.
  * Todo el código de la aplicación (`src/`) es TypeScript estricto.
  */
-// Deja el `fetch` de React Native en lugar del de Expo (`expo/fetch`).
-//
-// El "winter runtime" de Expo reemplaza `globalThis.fetch` por una versión que
-// importa `expo-modules-core`, y ese módulo lee `globalThis.expo.EventEmitter`
-// nada más evaluarse. En la build nativa `globalThis.expo` no existe (es
-// justo lo que `isExpoRuntime()` usa para distinguir los dos mundos), así que
-// cualquier `fetch` revienta con «Cannot read property 'EventEmitter' of
-// undefined» — incluido el que usa LogBox para simbolizar errores, que además
-// enmascaraba el error original.
-//
-// `runtime.native.ts` de Expo consulta esta bandera para no instalar el suyo.
-// El `fetch` de React Native funciona en los dos runtimes y la app no usa las
-// extensiones de `expo/fetch` (las llamadas HTTP van por axios).
-process.env.EXPO_PUBLIC_USE_RN_FETCH ??= '1';
-
 module.exports = {
-  presets: ['babel-preset-expo'],
+  presets: ['module:@react-native/babel-preset'],
   plugins: [
     // Requerido por Zod 4 (usa `export * as ns from …`).
     '@babel/plugin-transform-export-namespace-from',

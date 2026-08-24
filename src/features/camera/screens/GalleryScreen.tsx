@@ -7,11 +7,13 @@ import { Loader } from '@/components/ui/Loader';
 import { Screen } from '@/components/ui/Screen';
 import { StateView } from '@/components/ui/StateView';
 import type { RootScreenProps } from '@/navigation/types';
+import { useCameraStore } from '@/store/cameraStore';
 import { makeStyles } from '@/theme';
 
 import {
+  GALLERY_PHOTOS_QUERY_KEY,
+  GALLERY_STALE_TIME_MS,
   GalleryPermissionError,
-  GalleryUnavailableError,
   fetchGalleryPhotos,
   type GalleryPhoto,
 } from '../api/galleryPhotos';
@@ -53,9 +55,14 @@ const PhotoCell = memo(function PhotoCellBase({
  * Los cuatro estados de siempre: cargando, error (permiso o build sin
  * módulo, con mensajes distintos), vacío y datos.
  */
-export function GalleryScreen({ navigation }: RootScreenProps<'Galeria'>) {
+export function GalleryScreen({
+  navigation,
+  route,
+}: RootScreenProps<'Galeria'>) {
   const { width } = useWindowDimensions();
   const cellSize = width / COLUMNS;
+  const eligiendoFantasma = route.params?.modo === 'fantasma';
+  const setGhost = useCameraStore(state => state.setGhost);
 
   const {
     data: photos,
@@ -65,16 +72,22 @@ export function GalleryScreen({ navigation }: RootScreenProps<'Galeria'>) {
     refetch,
     isRefetching,
   } = useQuery({
-    queryKey: ['galeria', 'fotos'],
+    queryKey: GALLERY_PHOTOS_QUERY_KEY,
     queryFn: fetchGalleryPhotos,
-    staleTime: 30_000,
+    staleTime: GALLERY_STALE_TIME_MS,
   });
 
   const openPhoto = useCallback(
     (photo: GalleryPhoto) => {
+      // Abierta desde el fantasma, tocar una foto es elegirla, no verla.
+      if (eligiendoFantasma) {
+        setGhost(photo.uri);
+        navigation.goBack();
+        return;
+      }
       navigation.navigate('FotoDetalle', { uri: photo.uri });
     },
-    [navigation],
+    [eligiendoFantasma, navigation, setGhost],
   );
 
   const renderItem = useCallback<ListRenderItem<GalleryPhoto>>(
@@ -100,27 +113,22 @@ export function GalleryScreen({ navigation }: RootScreenProps<'Galeria'>) {
 
   if (isError) {
     const isPermission = error instanceof GalleryPermissionError;
-    const isUnavailable = error instanceof GalleryUnavailableError;
 
     return (
       <Screen>
         <StateView
           tone="error"
           title={
-            isUnavailable
-              ? 'Galería no disponible en esta build'
-              : isPermission
+            isPermission
               ? 'Sin permiso para leer tus fotos'
               : 'No se pudo cargar la galería'
           }
           description={
-            isUnavailable
-              ? 'Abre la app con Expo Go (npm run go) para ver tus fotos.'
-              : isPermission
+            isPermission
               ? 'Concede el permiso de fotos para ver aquí tu carrete.'
               : 'Inténtalo de nuevo en unos segundos.'
           }
-          actionLabel={isUnavailable ? undefined : 'Reintentar'}
+          actionLabel="Reintentar"
           onAction={handleRefresh}
         />
       </Screen>
@@ -132,7 +140,11 @@ export function GalleryScreen({ navigation }: RootScreenProps<'Galeria'>) {
       <Screen>
         <StateView
           title="Todavía no hay fotos"
-          description="Las fotos que tomes con la cámara aparecerán aquí."
+          description={
+            eligiendoFantasma
+              ? 'Toma una foto y podrás usarla como fantasma.'
+              : 'Las fotos que tomes con la cámara aparecerán aquí.'
+          }
         />
       </Screen>
     );

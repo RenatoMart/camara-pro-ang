@@ -1,17 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
+import { VisionCamera } from 'react-native-vision-camera';
 
 import { logger } from '@/utils/logger';
 
-import {
-  getCameraModule,
-  getVisionCameraModule,
-} from '../services/nativeModules';
-
-export type CameraPermissionStatus =
-  | 'comprobando'
-  | 'concedido'
-  | 'denegado'
-  | 'sin-modulo';
+export type CameraPermissionStatus = 'comprobando' | 'concedido' | 'denegado';
 
 export type CameraPermission = {
   status: CameraPermissionStatus;
@@ -20,34 +12,18 @@ export type CameraPermission = {
 };
 
 /**
- * Permiso de cámara, sobre la API imperativa del módulo que exista:
- * expo-camera en Expo Go, VisionCamera en la build nativa.
+ * Permiso de cámara, sobre la API imperativa de VisionCamera.
  *
- * No se usan los hooks de permisos de esos paquetes porque los módulos se
- * cargan dinámicamente y las reglas de hooks prohíben llamarlos condicionados
- * a que existan.
+ * Se usa la API imperativa y no el hook del paquete para poder comprobar el
+ * estado y pedirlo desde un efecto, sin acoplar el render al permiso.
  */
 export function useCameraPermission(): CameraPermission {
   const [status, setStatus] = useState<CameraPermissionStatus>('comprobando');
 
   const request = useCallback(async () => {
     try {
-      const expoCamera = getCameraModule();
-      if (expoCamera) {
-        const response =
-          await expoCamera.Camera.requestCameraPermissionsAsync();
-        setStatus(response.granted ? 'concedido' : 'denegado');
-        return;
-      }
-
-      const vision = getVisionCameraModule();
-      if (vision) {
-        const granted = await vision.VisionCamera.requestCameraPermission();
-        setStatus(granted ? 'concedido' : 'denegado');
-        return;
-      }
-
-      setStatus('sin-modulo');
+      const granted = await VisionCamera.requestCameraPermission();
+      setStatus(granted ? 'concedido' : 'denegado');
     } catch (error) {
       logger.error('No se pudo pedir el permiso de cámara', error);
       setStatus('denegado');
@@ -59,32 +35,14 @@ export function useCameraPermission(): CameraPermission {
 
     const check = async () => {
       try {
-        const expoCamera = getCameraModule();
-        if (expoCamera) {
-          const current = await expoCamera.Camera.getCameraPermissionsAsync();
-          if (!isActive) {
-            return;
-          }
-          if (current.granted) {
+        if (VisionCamera.cameraPermissionStatus === 'authorized') {
+          if (isActive) {
             setStatus('concedido');
-          } else {
-            // Primera vez (o permiso revocado): se pide directamente.
-            await request();
           }
           return;
         }
-
-        const vision = getVisionCameraModule();
-        if (vision) {
-          if (vision.VisionCamera.cameraPermissionStatus === 'authorized') {
-            setStatus('concedido');
-          } else {
-            await request();
-          }
-          return;
-        }
-
-        setStatus('sin-modulo');
+        // Primera vez (o permiso revocado): se pide directamente.
+        await request();
       } catch (error) {
         logger.error('No se pudo comprobar el permiso de cámara', error);
         if (isActive) {

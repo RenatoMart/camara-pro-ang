@@ -1,8 +1,17 @@
 import React from 'react';
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Line,
+  Path,
+  Rect,
+  Text as SvgText,
+} from 'react-native-svg';
 
 export type GlyphName =
   | 'ajustes'
+  | 'engranaje'
+  | 'aspecto'
+  | 'hdr'
   | 'rayo'
   | 'rayoOff'
   | 'temporizador'
@@ -11,7 +20,9 @@ export type GlyphName =
   | 'nivel'
   | 'galeria'
   | 'cerrar'
-  | 'check';
+  | 'check'
+  | 'chevronAbajo'
+  | 'chevronArriba';
 
 export type GlyphProps = {
   name: GlyphName;
@@ -46,6 +57,43 @@ export function Glyph({ name, color, size = 20 }: GlyphProps) {
           <Line x1={4} y1={16} x2={20} y2={16} {...common} />
           <Circle cx={9} cy={8} r={2.4} {...common} fill={color} />
           <Circle cx={15} cy={16} r={2.4} {...common} fill={color} />
+        </>
+      ) : null}
+
+      {name === 'engranaje' ? (
+        <>
+          <Circle cx={12} cy={12} r={3.2} {...common} />
+          <Path
+            d="M12 2.6 l1.5 2.2 2.6-.5 .6 2.6 2.4 1.2 -1.3 2.3 1.3 2.3 -2.4 1.2 -.6 2.6 -2.6-.5 -1.5 2.2 -1.5-2.2 -2.6 .5 -.6-2.6 -2.4-1.2 1.3-2.3 -1.3-2.3 2.4-1.2 .6-2.6 2.6 .5 Z"
+            {...common}
+          />
+        </>
+      ) : null}
+
+      {/* El HDR se reconoce por sus letras, no por un símbolo: es como lo
+          rotula cualquier cámara. El recuadro las encierra para que el glifo
+          pese lo mismo que el resto de la fila. */}
+      {name === 'hdr' ? (
+        <>
+          <Rect x={1.5} y={5.5} width={21} height={13} rx={3} {...common} />
+          <SvgText
+            x={12}
+            y={15.2}
+            fill={color}
+            stroke="none"
+            fontSize={8.4}
+            fontWeight="bold"
+            textAnchor="middle"
+          >
+            HDR
+          </SvgText>
+        </>
+      ) : null}
+
+      {name === 'aspecto' ? (
+        <>
+          <Rect x={3} y={5} width={18} height={14} rx={2} {...common} />
+          <Rect x={7} y={8} width={10} height={8} rx={1} {...common} />
         </>
       ) : null}
 
@@ -110,6 +158,14 @@ export function Glyph({ name, color, size = 20 }: GlyphProps) {
       ) : null}
 
       {name === 'check' ? <Path d="M5 13 l4 4 L19 7" {...common} /> : null}
+
+      {name === 'chevronAbajo' ? (
+        <Path d="M5 9 L12 16 L19 9" {...common} />
+      ) : null}
+
+      {name === 'chevronArriba' ? (
+        <Path d="M5 15 L12 8 L19 15" {...common} />
+      ) : null}
     </Svg>
   );
 }

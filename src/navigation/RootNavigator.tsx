@@ -73,7 +73,12 @@ export function RootNavigator() {
         <Stack.Screen
           name="Galeria"
           component={GalleryScreen}
-          options={{ title: 'Galería' }}
+          options={({ route }) => ({
+            title:
+              route.params?.modo === 'fantasma'
+                ? 'Elige la foto fantasma'
+                : 'Galería',
+          })}
         />
         <Stack.Screen
           name="FotoDetalle"

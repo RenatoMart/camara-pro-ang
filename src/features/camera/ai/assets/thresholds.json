@@ -1,0 +1,16 @@
+{
+  "rule_of_thirds": 0.45,
+  "vertical": 0.65,
+  "horizontal": 0.6,
+  "diagonal": 0.65,
+  "curved": 0.75,
+  "triangle": 0.75,
+  "center": 0.6,
+  "symmetric": 0.55,
+  "pattern": 0.55,
+  "vanishing_point": 0.5,
+  "shallow_dof": 0.5,
+  "color_blocking": 0.5,
+  "tonal_contrast": 0.5,
+  "negative_space": 0.5
+}

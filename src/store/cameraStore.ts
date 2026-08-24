@@ -6,8 +6,11 @@ import type {
   AspectKind,
   FlashKind,
   GuideKind,
+  GuideMode,
+  HdrKind,
   TimerKind,
 } from '@/features/camera/constants/guides';
+import type { CameraMode } from '@/features/camera/constants/modes';
 import { StorageKeys } from '@/services/storage';
 
 /**
@@ -20,16 +23,31 @@ import { StorageKeys } from '@/services/storage';
  */
 
 type CameraPrefs = {
+  /** La guía elegida a mano; en modo automático la propone el asistente. */
   guide: GuideKind;
+  /**
+   * Quién decide la guía.
+   *
+   * `manual` respeta lo que elijas. `auto` deja que el asistente de
+   * composición la proponga a partir de lo que ve la cámara, y en ese modo
+   * `guide` deja de mandar (pero se conserva para cuando vuelvas a manual).
+   */
+  guideMode: GuideMode;
+  /**
+   * Modo de disparo elegido en la tira inferior.
+   *
+   * Manda sobre qué controles se ven: `pro` es el único que despliega el
+   * panel de guías y ajustes finos.
+   */
+  mode: CameraMode;
   aspect: AspectKind;
   flash: FlashKind;
+  hdr: HdrKind;
   timer: TimerKind;
   /** Nivel de horizonte visible. */
   levelOn: boolean;
   /** Disparo automático al nivelar. */
   autoShutter: boolean;
-  /** Panel PRO desplegado. */
-  proMode: boolean;
   /**
    * Fundir el fantasma dentro de la foto al disparar.
    *
@@ -41,6 +59,13 @@ type CameraPrefs = {
 };
 
 type CameraSession = {
+  /**
+   * Guía que propone el asistente en este momento, o `null`.
+   *
+   * Vive en la sesión y no en las preferencias: depende de lo que la cámara
+   * esté viendo ahora, así que no tiene sentido recordarla entre arranques.
+   */
+  suggestedGuide: GuideKind | null;
   facing: 'back' | 'front';
   /** Zoom normalizado 0..1, como lo espera expo-camera. */
   zoom: number;
@@ -53,12 +78,16 @@ type CameraSession = {
 
 type CameraActions = {
   setGuide: (guide: GuideKind) => void;
+  setGuideMode: (mode: GuideMode) => void;
+  toggleGuideMode: () => void;
+  setSuggestedGuide: (guide: GuideKind | null) => void;
+  setMode: (mode: CameraMode) => void;
   setAspect: (aspect: AspectKind) => void;
   setFlash: (flash: FlashKind) => void;
+  setHdr: (hdr: HdrKind) => void;
   setTimer: (timer: TimerKind) => void;
   toggleLevel: () => void;
   toggleAutoShutter: () => void;
-  toggleProMode: () => void;
   toggleGhostBurn: () => void;
   toggleFacing: () => void;
   setZoom: (zoom: number) => void;
@@ -69,16 +98,19 @@ type CameraActions = {
 
 const initialPrefs: CameraPrefs = {
   guide: 'tercios',
+  guideMode: 'manual',
+  mode: 'foto',
   aspect: 'sensor',
   flash: 'off',
+  hdr: 'off',
   timer: 0,
   levelOn: false,
   autoShutter: false,
-  proMode: false,
   ghostBurn: false,
 };
 
 const initialSession: CameraSession = {
+  suggestedGuide: null,
   facing: 'back',
   zoom: 0,
   ghostUri: null,
@@ -96,14 +128,29 @@ export const useCameraStore = create<
       ...initialPrefs,
       ...initialSession,
 
-      setGuide: guide => set({ guide }),
+      // Elegir una guía a mano implica querer mandar tú: sale de automático.
+      setGuide: guide => set({ guide, guideMode: 'manual' }),
+      setGuideMode: mode => set({ guideMode: mode }),
+      toggleGuideMode: () =>
+        set(state => ({
+          guideMode: state.guideMode === 'auto' ? 'manual' : 'auto',
+        })),
+      setSuggestedGuide: guide => set({ suggestedGuide: guide }),
+      setMode: mode => set({ mode }),
       setAspect: aspect => set({ aspect }),
       setFlash: flash => set({ flash }),
+      setHdr: hdr => set({ hdr }),
       setTimer: timer => set({ timer }),
       toggleLevel: () => set(state => ({ levelOn: !state.levelOn })),
+      // El disparo automático se apoya en el nivel para saber cuándo disparar,
+      // así que encenderlo enciende también el nivel: activarlo por su cuenta
+      // no hacía absolutamente nada y parecía un botón roto.
       toggleAutoShutter: () =>
-        set(state => ({ autoShutter: !state.autoShutter })),
-      toggleProMode: () => set(state => ({ proMode: !state.proMode })),
+        set(state =>
+          state.autoShutter
+            ? { autoShutter: false }
+            : { autoShutter: true, levelOn: true },
+        ),
       toggleGhostBurn: () => set(state => ({ ghostBurn: !state.ghostBurn })),
       toggleFacing: () =>
         set(state => ({ facing: state.facing === 'back' ? 'front' : 'back' })),
@@ -115,17 +162,55 @@ export const useCameraStore = create<
     {
       name: StorageKeys.cameraPrefs,
       storage: createJSONStorage(() => AsyncStorage),
-      version: 1,
+      version: 2,
+      /**
+       * v1 → v2: el interruptor `proMode` pasó a ser un modo de disparo más
+       * de la tira inferior. Sin esta migración, zustand descartaría las
+       * preferencias guardadas y la cámara arrancaría de cero tras actualizar.
+       */
+      migrate: (persisted: unknown, version: number) => {
+        if (
+          version >= 2 ||
+          persisted === null ||
+          typeof persisted !== 'object'
+        ) {
+          return persisted as CameraPrefs;
+        }
+
+        const { proMode, ...rest } = persisted as Partial<CameraPrefs> & {
+          proMode?: boolean;
+        };
+
+        return {
+          ...initialPrefs,
+          ...rest,
+          mode: proMode === true ? 'pro' : initialPrefs.mode,
+        } satisfies CameraPrefs;
+      },
       partialize: state => ({
         guide: state.guide,
+        guideMode: state.guideMode,
+        mode: state.mode,
         aspect: state.aspect,
         flash: state.flash,
+        hdr: state.hdr,
         timer: state.timer,
         levelOn: state.levelOn,
         autoShutter: state.autoShutter,
-        proMode: state.proMode,
         ghostBurn: state.ghostBurn,
       }),
     },
   ),
 );
+
+/**
+ * La guía que hay que dibujar ahora mismo.
+ *
+ * En manual manda la elegida. En automático manda la que propone el
+ * asistente, y si todavía no propone ninguna no se dibuja nada: es preferible
+ * un visor limpio a dejar puesta una guía que ya no viene a cuento.
+ */
+export const selectActiveGuide = (
+  state: CameraPrefs & CameraSession,
+): GuideKind =>
+  state.guideMode === 'auto' ? state.suggestedGuide ?? 'ninguna' : state.guide;

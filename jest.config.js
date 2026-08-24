@@ -7,7 +7,7 @@ module.exports = {
     '^@env$': '<rootDir>/jest/envMock.ts',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(?:.pnpm/)?((jest-)?react-native|@react-native(-community|-async-storage)?|@react-navigation|react-native-.*|@testing-library|expo(nent)?|@expo(nent)?|@shopify)/)',
+    'node_modules/(?!(?:.pnpm/)?((jest-)?react-native|@react-native(-community|-async-storage)?|@react-navigation|react-native-.*|@testing-library|@shopify)/)',
   ],
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',

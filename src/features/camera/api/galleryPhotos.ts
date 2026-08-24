@@ -1,9 +1,6 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 
-import {
-  getCameraRollModule,
-  getMediaLibraryModule,
-} from '../services/nativeModules';
+import { CameraRoll } from '../services/nativeModules';
 
 export type GalleryPhoto = {
   id: string;
@@ -12,18 +9,21 @@ export type GalleryPhoto = {
 
 export const GALLERY_PAGE_SIZE = 90;
 
+/**
+ * Clave y frescura de la consulta del carrete.
+ *
+ * Viven aquí para que la galería y el fantasma compartan la misma entrada de
+ * caché: al abrir el fantasma nada más arrancar no se relee el carrete si la
+ * galería ya lo trajo, y viceversa.
+ */
+export const GALLERY_PHOTOS_QUERY_KEY = ['galeria', 'fotos'] as const;
+export const GALLERY_STALE_TIME_MS = 30_000;
+
 /** Error tipado para distinguir "sin permiso" de un fallo real. */
 export class GalleryPermissionError extends Error {
   constructor() {
     super('Permiso de galería denegado');
     this.name = 'GalleryPermissionError';
-  }
-}
-
-export class GalleryUnavailableError extends Error {
-  constructor() {
-    super('Galería no disponible en esta build');
-    this.name = 'GalleryUnavailableError';
   }
 }
 
@@ -42,45 +42,23 @@ async function ensureAndroidReadPermission(): Promise<boolean> {
 }
 
 /**
- * Últimas fotos del carrete, más recientes primero, con el módulo que
- * exista: expo-media-library en Expo Go, CameraRoll en la build nativa.
+ * Últimas fotos del carrete, más recientes primero.
  *
- * Pide el permiso de lectura la primera vez. Lanza errores tipados para que
- * la pantalla muestre el estado correcto (permiso vs. build sin módulo).
+ * Pide el permiso de lectura la primera vez y lanza `GalleryPermissionError`
+ * si se deniega, para que la pantalla muestre el estado correcto.
  */
 export async function fetchGalleryPhotos(): Promise<GalleryPhoto[]> {
-  const mediaLibrary = getMediaLibraryModule();
-  if (mediaLibrary) {
-    const permission = await mediaLibrary.requestPermissionsAsync();
-    if (!permission.granted) {
-      throw new GalleryPermissionError();
-    }
-
-    const page = await mediaLibrary.getAssetsAsync({
-      mediaType: 'photo',
-      first: GALLERY_PAGE_SIZE,
-      sortBy: [[mediaLibrary.SortBy.creationTime, false]],
-    });
-
-    return page.assets.map(asset => ({ id: asset.id, uri: asset.uri }));
+  if (!(await ensureAndroidReadPermission())) {
+    throw new GalleryPermissionError();
   }
 
-  const cameraRoll = getCameraRollModule();
-  if (cameraRoll) {
-    if (!(await ensureAndroidReadPermission())) {
-      throw new GalleryPermissionError();
-    }
+  const page = await CameraRoll.getPhotos({
+    first: GALLERY_PAGE_SIZE,
+    assetType: 'Photos',
+  });
 
-    const page = await cameraRoll.CameraRoll.getPhotos({
-      first: GALLERY_PAGE_SIZE,
-      assetType: 'Photos',
-    });
-
-    return page.edges.map(edge => ({
-      id: edge.node.image.uri,
-      uri: edge.node.image.uri,
-    }));
-  }
-
-  throw new GalleryUnavailableError();
+  return page.edges.map(edge => ({
+    id: edge.node.image.uri,
+    uri: edge.node.image.uri,
+  }));
 }

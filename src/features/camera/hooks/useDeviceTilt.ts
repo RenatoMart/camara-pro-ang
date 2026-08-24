@@ -30,11 +30,9 @@ export type DeviceTilt = {
 /**
  * Inclinación del teléfono a partir del sensor de gravedad, vía Reanimated.
  *
- * Se usa `useAnimatedSensor` (y no expo-sensors) porque Reanimated existe en
- * los dos mundos: viene compilado dentro de Expo Go y también en la build
- * nativa. Los ángulos continuos viven en SharedValues del hilo de UI (nada
- * de re-renders por lectura); a React sólo llega `isLevel`, que cambia rara
- * vez y con histéresis.
+ * Los ángulos continuos viven en SharedValues del hilo de UI (nada de
+ * re-renders por lectura); a React sólo llega `isLevel`, que cambia rara vez
+ * y con histéresis.
  *
  * La fórmula replica `tiltFromGravity` de `utils/geometry.ts` (donde está
  * probada); aquí va inline porque el cuerpo de un worklet no puede llamar a
@@ -50,8 +48,11 @@ export function useDeviceTilt(enabled: boolean): DeviceTilt {
 
   const roll = useDerivedValue(() => {
     const { x, y } = gravity.sensor.value;
-    // |y| desacopla el convenio de signos de cada plataforma.
-    return Math.atan2(x, Math.abs(y)) * TO_DEGREES;
+    // Giro completo en el plano de la pantalla y desviación respecto al
+    // cuarto de vuelta más cercano: así el nivel funciona igual con el
+    // teléfono en vertical que en horizontal. Ver `tiltFromGravity`.
+    const screenAngle = Math.atan2(x, -y) * TO_DEGREES;
+    return screenAngle - Math.round(screenAngle / 90) * 90;
   });
 
   const pitch = useDerivedValue(() => {

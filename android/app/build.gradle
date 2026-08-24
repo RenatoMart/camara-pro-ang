@@ -37,7 +37,13 @@ react {
     // bundleAssetName = "MyApplication.android.bundle"
     //
     //   The entry file for bundle generation. Default is 'index.android.js' or 'index.js'
-    // entryFile = file("../js/MyApplication.android.js")
+    //
+    //   Este proyecto entra por `index.ts` (todo el código de la app es
+    //   TypeScript), no por el `index.js` que asume el plugin. Metro lo
+    //   resuelve solo en debug, pero la build de release genera el bundle
+    //   desde Gradle y falla con «entryFile ... index.js which doesn't exist»
+    //   si no se le dice la ruta exacta.
+    entryFile = file("../../index.ts")
     //
     //   A list of extra flags to pass to the 'bundle' commands.
     //   See https://github.com/react-native-community/cli/blob/main/docs/commands.md#bundle
@@ -85,6 +91,17 @@ android {
         versionCode 1
         versionName "1.0"
     }
+
+    // Motor de composición IA: código C++ propio (src/main/jni), no una
+    // librería de RN. Sustituye al CMakeLists.txt "invisible" que pone el
+    // plugin de React Native por defecto; por eso se copian aquí también
+    // `ReactNative-application.cmake`/`OnLoad.cpp` (ver comentario en el
+    // propio CMakeLists.txt).
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+        }
+    }
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -96,15 +113,62 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            // La build de desarrollo se instala como una app aparte
+            // (`com.camaraproang.debug`, nombre «CamaraPro dev» vía
+            // `src/debug/res`), para que el APK de release pueda convivir con
+            // ella en el mismo teléfono en vez de sustituirla al instalar.
+            applicationIdSuffix ".debug"
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
+            // Firmado con el keystore de debug a propósito: esta app se
+            // distribuye como APK de uso personal, no por Play Store. Si algún
+            // día se publica, hay que generar un keystore propio.
             signingConfig signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+
+    sourceSets {
+        main {
+            // El modelo y sus metadatos siguen viviendo junto a la feature que
+            // los usa (`src/features/camera/ai/assets`), pero se empaquetan
+            // como assets del APK: el motor C++ los lee con `AAssetManager`,
+            // así que el `.tflite` no pasa nunca por JavaScript. Antes se
+            // pedía por `fetch` a la URL que resuelve Metro, y eso sólo
+            // funciona en depuración: en release `resolveAssetSource` devuelve
+            // un identificador de recurso Android, no una URL.
+            assets.srcDirs += file("../../src/features/camera/ai/assets")
+        }
+    }
+
+    androidResources {
+        // El `.tflite` se guarda sin comprimir: se lee de un tirón al abrir el
+        // asistente y comprimirlo sólo añade una descompresión en memoria (el
+        // modelo es int8, así que el ahorro de tamaño es mínimo). Además deja
+        // la puerta abierta a mapearlo con `mmap` más adelante.
+        noCompress += ["tflite"]
+    }
+
+    packagingOptions {
+        // `libtensorflowlite_jni.so` sólo la extrae y empaqueta este módulo
+        // (ya no depende de react-native-fast-tflite), pero si algún día
+        // vuelve a haber dos AARs ofreciendo el mismo .so, que gane la primera
+        // en vez de que falle el merge de Gradle.
+        jniLibs {
+            pickFirsts += ["**/libtensorflowlite_jni.so"]
+        }
+    }
+}
+
+// Extracción del runtime de TensorFlow Lite (LiteRT) para el motor de
+// composición: el .aar de Google trae el `.so` y los headers de la API C de
+// TFLite (`tflite/c/c_api.h`). El motor de composición los usa desde C++
+// propio (`src/main/jni/composition/`); no hay ninguna librería de React
+// Native de por medio.
+configurations {
+    extractHeaders
+    extractSO
 }
 
 dependencies {
@@ -115,5 +179,48 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
+    }
+
+    implementation "com.google.ai.edge.litert:litert:1.4.0"
+    extractSO "com.google.ai.edge.litert:litert:1.4.0"
+    extractHeaders "com.google.ai.edge.litert:litert:1.4.0"
+}
+
+task extractLitertHeaders {
+    doLast {
+        configurations.extractHeaders.files.each { aarFile ->
+            copy {
+                from zipTree(aarFile)
+                into "src/main/jni/composition/lib/litert/headers"
+                include "headers/**/*.h"
+                eachFile { details ->
+                    details.path = details.path.replaceFirst("^headers/", "")
+                }
+                includeEmptyDirs = false
+            }
+        }
+    }
+}
+
+task extractLitertSO {
+    doLast {
+        configurations.extractSO.files.each { aarFile ->
+            copy {
+                from zipTree(aarFile)
+                into "src/main/jni/composition/lib/litert"
+                include "jni/**/*.so"
+            }
+        }
+    }
+}
+
+afterEvaluate {
+    tasks.findAll { task ->
+        !task.name.contains("Clean") &&
+            (task.name.contains("externalNative") ||
+             task.name.contains("CMake") ||
+             task.name.contains("generateJsonModel"))
+    }.forEach { task ->
+        task.dependsOn(extractLitertHeaders, extractLitertSO)
     }
 }

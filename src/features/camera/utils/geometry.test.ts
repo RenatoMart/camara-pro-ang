@@ -93,22 +93,65 @@ describe('aspectCropInsets', () => {
   });
 });
 
+/** Gravedad de un teléfono girado `deg` grados en el plano de la pantalla. */
+function gravityAtAngle(deg: number): { x: number; y: number; z: number } {
+  const rad = (deg * Math.PI) / 180;
+  return { x: Math.sin(rad), y: -Math.cos(rad), z: 0 };
+}
+
 describe('tiltFromGravity', () => {
   it('teléfono vertical y recto: roll y pitch cero', () => {
-    expect(tiltFromGravity({ x: 0, y: -1, z: 0 })).toEqual({
-      roll: 0,
-      pitch: 0,
-    });
-    // El convenio de signos de `y` no afecta (iOS vs Android).
-    expect(tiltFromGravity({ x: 0, y: 1, z: 0 })).toEqual({
-      roll: 0,
-      pitch: 0,
-    });
+    const tilt = tiltFromGravity({ x: 0, y: -1, z: 0 });
+
+    expect(tilt.roll).toBe(0);
+    expect(tilt.pitch).toBe(0);
+    expect(tilt.orientation).toBe('vertical');
   });
 
-  it('girado 45° en el plano de pantalla', () => {
-    const tilt = tiltFromGravity({ x: 0.707, y: -0.707, z: 0 });
-    expect(tilt.roll).toBeCloseTo(45, 0);
+  it('boca abajo también cuenta como recto', () => {
+    const tilt = tiltFromGravity({ x: 0, y: 1, z: 0 });
+
+    expect(tilt.roll).toBe(0);
+    expect(tilt.orientation).toBe('vertical-invertido');
+  });
+
+  /**
+   * El fallo que motivó el cambio: midiendo contra la vertical absoluta, un
+   * teléfono en horizontal daba 90° de desvío y el nivel no se ponía verde
+   * nunca, por muy recto que estuviera el horizonte.
+   */
+  it('en horizontal, recto es recto (no 90° de desvío)', () => {
+    const derecha = tiltFromGravity(gravityAtAngle(90));
+    const izquierda = tiltFromGravity(gravityAtAngle(-90));
+
+    expect(derecha.roll).toBeCloseTo(0, 5);
+    expect(derecha.orientation).toBe('horizontal-derecha');
+    expect(izquierda.roll).toBeCloseTo(0, 5);
+    expect(izquierda.orientation).toBe('horizontal-izquierda');
+  });
+
+  it('detecta el mismo desvío en cualquier orientación', () => {
+    // Tres grados torcido, se sostenga como se sostenga el teléfono.
+    for (const base of [0, 90, 180, -90]) {
+      const tilt = tiltFromGravity(gravityAtAngle(base + 3));
+
+      expect(tilt.roll).toBeCloseTo(3, 1);
+    }
+  });
+
+  it('el roll nunca se sale de ±45°', () => {
+    for (let deg = -180; deg <= 180; deg += 7) {
+      const { roll } = tiltFromGravity(gravityAtAngle(deg));
+
+      expect(Math.abs(roll)).toBeLessThanOrEqual(45.001);
+    }
+  });
+
+  it('a 45° está justo entre dos orientaciones', () => {
+    expect(Math.abs(tiltFromGravity(gravityAtAngle(45)).roll)).toBeCloseTo(
+      45,
+      0,
+    );
   });
 
   it('teléfono tumbado (cenital): pitch ±90°', () => {

@@ -1,8 +1,7 @@
-# Cámara PRO (sobre plantilla React Native + TypeScript)
+# Cámara PRO (React Native + TypeScript)
 
 App de cámara con guías de composición avanzadas y asistentes en tiempo
-real, construida sobre esta plantilla de React Native 0.86 (New
-Architecture) y TypeScript estricto.
+real, sobre React Native 0.86 (New Architecture) y TypeScript estricto.
 
 ---
 
@@ -37,38 +36,70 @@ la superposición a la misma opacidad que ves en pantalla, y lo que se guarda
 es la mezcla (doble exposición). El interruptor sólo aparece con el fantasma
 activo y se recuerda entre sesiones.
 
-La mezcla la hace `features/camera/utils/ghostCompose.ts` con Skia, que se
-eligió por ser la única librería de dibujo presente **en los dos runtimes**
-(viene en Expo Go SDK 57 y compila en la build nativa). Se compone sobre los
-píxeles reales de la foto, no sobre lo que se ve en pantalla, así que no se
+La mezcla la hace `features/camera/utils/ghostCompose.ts` con Skia, sobre los
+píxeles reales de la foto y no sobre lo que se ve en pantalla, así que no se
 pierde resolución. Si la composición falla, se guarda la toma original: nunca
 se pierde la foto.
 
-### Cómo funciona en cada mundo
+### Guías: manual y automático
 
-La app corre **completa** en los dos flujos, con librerías de cámara
-distintas detrás del mismo contrato (`CameraViewport` + `nativeModules.ts`):
+El panel PRO ofrece 15 guías: las clásicas (3×3, Phi, 4×4, espiral, triángulos,
+simetría) más las que vienen del asistente de composición (vertical,
+horizontal, diagonal, curva en S, centro, patrón, punto de fuga y aire).
 
-| Capacidad          | Expo Go (`npm run go`)     | Build nativa (`npm run android`) |
-| ------------------ | -------------------------- | -------------------------------- |
-| Visor y captura    | expo-camera                | **react-native-vision-camera** 5 |
-| Galería y guardado | expo-media-library         | @react-native-camera-roll        |
-| Nivel (sensores)   | Reanimated (sensor nativo) | Reanimated (sensor nativo)       |
-| Vibración          | expo-haptics               | `Vibration` de React Native      |
-| Fundir el fantasma | Skia + expo-file-system    | Skia + react-native-nitro-image  |
+El chip **Automático** deja que el asistente elija la guía a partir de lo que
+ve la cámara; tocar cualquier guía vuelve a manual sin perder tu elección
+anterior. En automático se resalta la que propone el asistente, no la
+guardada, para que se vea qué está haciendo.
 
-En tiempo de ejecución, `nativeModules.ts` detecta el runtime con
-`global.expo` (sólo existe dentro de Expo Go) y carga el módulo correcto;
-nunca importes paquetes `expo-*`, VisionCamera o CameraRoll directamente.
-En el lado nativo, `react-native.config.js` excluye los paquetes de Expo del
-autolinking de Gradle/CocoaPods.
+Dos de las guías (**punto de fuga** y **aire**) están marcadas como no
+sugeribles: sus clases nunca llegaron a entrenarse, así que el asistente no
+las propondrá nunca, pero se pueden elegir a mano igual que el resto.
+
+El motor vive en `src/features/camera/ai/` (decisión: umbrales, mapeo a guías
+e histéresis) y en `android/app/src/main/jni/composition/` (inferencia). La
+cadena completa es: 1 de cada 6 fotogramas del visor → `HybridFrameConverter`
+lo endereza y lo estira a 224×224 RGB → el motor C++ corre el `.tflite` por
+JSI, sin bridge → 14 sigmoides → umbral por clase → la guía se confirma tras
+5 análisis seguidos (~1 s) para que no parpadee.
+
+El `.tflite` se empaqueta como asset del APK y lo lee el propio C++ con
+`AAssetManager`: JavaScript no toca nunca sus bytes. El archivo sigue viviendo
+en `src/features/camera/ai/assets/`, que `android/app/build.gradle` declara
+como carpeta de assets del módulo.
+
+**Sólo funciona en Android**, que es el único flujo del proyecto: la
+inferencia es C++ propio compilado con la app.
+
+### Las piezas nativas
+
+| Capacidad                | Librería                              |
+| ------------------------ | ------------------------------------- |
+| Visor y captura          | **react-native-vision-camera** 5      |
+| Fotogramas del visor     | react-native-vision-camera-worklets   |
+| Inferencia del asistente | C++ propio + TensorFlow Lite (LiteRT) |
+| Galería y guardado       | @react-native-camera-roll             |
+| Nivel (sensores)         | Reanimated (`useAnimatedSensor`)      |
+| Vibración                | `Vibration` de React Native           |
+| Fundir el fantasma       | Skia + react-native-nitro-image       |
+
+`features/camera/services/nativeModules.ts` reexporta estas piezas para que el
+resto de la feature dependa de un contrato propio en vez de hablar
+directamente con cada paquete: cambiar de librería se hace en un solo sitio.
 
 ### Hoja de ruta
 
-Focus peaking, patrón zebra e histograma en tiempo real necesitan acceso a
-los fotogramas del preview (frame processors de VisionCamera). Con la
-migración a VisionCamera ya hecha, son el siguiente paso natural; no se
-simulan con datos falsos.
+La canalización de fotogramas del visor ya está montada y en uso por el
+asistente de composición (`useCompositionAnalysis`): output de frames de
+VisionCamera → worklet → C++ por JSI. Lo que falta se apoya en ella:
+
+- **Focus peaking, patrón zebra e histograma**: son el mismo camino, cambiando
+  lo que se hace con el buffer. `useCompositionAnalysis` es el ejemplo a
+  copiar; no se simulan con datos falsos.
+- **Geometría de la escena en C++** (ángulo del horizonte, dirección de la
+  diagonal, cuadrante del sujeto para orientar la espiral): son cálculos de
+  visión por computador que la red no resuelve. Van junto al motor, en
+  `jni/composition/`. El detalle está en `estructura_cambios.md`.
 
 ---
 
@@ -79,49 +110,9 @@ npm install          # instala dependencias y prepara los git hooks
 cp .env.example .env # variables de entorno (ver sección Entornos)
 ```
 
-Y a partir de ahí tienes **dos formas de trabajar**:
-
-### 1. Ver la app en tu celular sin compilar nada (Expo Go)
-
-La más rápida para empezar y para enseñar avances.
-
-```bash
-npm run go
-```
-
-1. Instala **Expo Go** en tu celular (Play Store / App Store).
-2. Asegúrate de que el celular y la computadora estén **en la misma red WiFi**.
-3. Escanea el QR que aparece en la terminal.
-
-Si tu red bloquea la conexión (WiFi de oficina, universidad, etc.):
-
-```bash
-npm run go:tunnel   # más lento, pero funciona desde cualquier red
-```
-
-Y si algo se queda pegado con caché vieja:
-
-```bash
-npm run go:clear
-```
-
-> **Importante — la letra pequeña de Expo Go**
->
-> Expo Go es una app ya compilada que trae dentro un conjunto **fijo** de
-> librerías nativas. Sirve para ver la app al instante, pero:
->
-> - Sólo funcionan las librerías nativas que Expo Go ya incluye. Las de esta
->   plantilla (navegación, gestos, almacenamiento, FlashList) están todas
->   incluidas, por eso funciona.
-> - Si añades una librería nativa que Expo Go no trae, **dejará de funcionar
->   ahí** y tendrás que usar la build nativa.
-> - Funciona porque Expo SDK 57 apunta a React Native 0.86.2, exactamente la
->   versión de esta plantilla. Si actualizas React Native por tu cuenta, esta
->   compatibilidad se rompe.
-
-### 2. Build nativa completa
-
-La que usarás para publicar y la que no tiene ninguna limitación.
+El proyecto se compila y se depura siempre como **build nativa**, por cable
+USB. No pasa por Expo ni por Expo Go: se quitaron a propósito porque limitan
+qué librerías nativas se pueden usar y complican la depuración.
 
 > **Antes de compilar: hace falta JDK 17 o 21, y ninguno más nuevo.**
 >
@@ -158,6 +149,26 @@ npm run pods
 En Android basta con volver a ejecutar `npm run android`; el autolinking se
 encarga del resto.
 
+### APK que funciona sin el cable
+
+`npm run android` genera una build de **debug**, que no lleva el JavaScript
+dentro: se lo pide a Metro por el cable en cada arranque. Para una app que
+funcione sola en el teléfono hace falta la de **release**, que empaqueta el
+bundle en `assets/index.android.bundle`:
+
+```bash
+npm run android:release
+```
+
+- `android/app/build.gradle` apunta `entryFile` a `index.ts`. El plugin de
+  React Native asume `index.js`, y sin esa línea la build de release falla al
+  generar el bundle. En debug no se nota, porque el bundle lo resuelve Metro.
+- El release se firma con `debug.keystore` a propósito: sirve para uso
+  personal y para pasarle el APK a alguien, **no para Play Store**. Para
+  publicar hay que generar un keystore propio y guardarlo fuera del repo
+  (`*.keystore` ya está en `.gitignore`); si se pierde, no se pueden volver a
+  firmar actualizaciones de esa app.
+
 ---
 
 ## Estructura
@@ -172,12 +183,13 @@ src/
 ├── config/              Lectura y validación de variables de entorno
 ├── features/            ⭐ El código de negocio vive aquí
 │   ├── camera/          ⭐⭐ La app de cámara
+│   │   ├── ai/          Asistente de composición (modelo, umbrales, mapeo)
 │   │   ├── api/         Lectura del carrete (media library)
 │   │   ├── components/  Visor, HUD, guías, máscaras, nivel, panel PRO
 │   │   ├── constants/   Catálogo de guías, formatos, tolerancias
 │   │   ├── hooks/       Permiso, captura, inclinación, temporizador…
 │   │   ├── screens/     Cámara, Galería, Visor de foto
-│   │   ├── services/    Carga protegida de módulos de Expo
+│   │   ├── services/    Contrato con las librerías nativas de cámara
 │   │   └── utils/       Geometría pura (espiral áurea, máscaras, nivel)
 │   ├── auth/            Ejemplo de la plantilla (no montado en la app)
 │   ├── posts/           Ejemplo de la plantilla (no montado en la app)
@@ -192,9 +204,15 @@ src/
 └── utils/               Funciones puras (logger, formato)
 ```
 
-> La carpeta se llama `src/providers/` y no `src/app/` a propósito: Expo
-> interpreta cualquier `app/` como directorio de rutas de Expo Router y
-> intentaría usarlo para navegar.
+> Los providers globales viven en `src/providers/`, junto al resto de la
+> aplicación, para que `src/App.tsx` se quede sólo con la composición.
+
+Hay una segunda mitad fuera de `src/`: el C++ propio del asistente de
+composición, en `android/app/src/main/jni/composition/` (motor de inferencia,
+lectura del modelo desde los assets y, más adelante, la geometría de las
+líneas). `android/app/src/main/jni/CMakeLists.txt` es el del target de la app,
+copiado del que React Native esconde en `node_modules` y ampliado para
+construir esa biblioteca.
 
 ### La regla más importante: _feature-first_
 
@@ -300,17 +318,9 @@ Cada clave se guarda como una entrada independiente del Keychain
 (`service: key`) con `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, así que la credencial no
 viaja en las copias de seguridad de iCloud y queda atada al dispositivo.
 
-> **Expo Go y el fallback**
->
-> `react-native-keychain` es un módulo nativo que Expo Go no trae compilado.
-> Para que `npm run go` siga funcionando como vista previa, `secureStorage`
-> detecta esa situación en tiempo de ejecución y cae a AsyncStorage,
-> registrando un aviso en consola.
->
-> **Ese fallback no cifra nada.** Sólo se activa dentro de Expo Go. En
-> cualquier build nativa (`npm run android` / `npm run ios`) se usa siempre el
-> almacén seguro real, que es lo que llega a producción. No inicies sesión con
-> credenciales reales desde Expo Go.
+> `secureStorage` **no tiene camino alternativo** a propósito: si el almacén
+> seguro falla, registra el error y no guarda nada, en lugar de dejar una
+> credencial en texto plano.
 
 ---
 
@@ -418,9 +428,9 @@ historial.
 Para navegar desde fuera de React (interceptores, notificaciones push) usa los
 helpers de `src/navigation/navigationRef.ts`.
 
-> Los tabs usan `@react-navigation/bottom-tabs`, que es JS. La versión nativa
-> (`react-native-bottom-tabs`) se siente mejor, pero no viene en Expo Go. Si
-> renuncias a Expo Go, cambiarla es un buen upgrade.
+> Los tabs usan `@react-navigation/bottom-tabs`, que es JS. Cambiarlos por
+> `react-native-bottom-tabs` (nativos) es un buen upgrade pendiente: se
+> sienten mejor y ya no hay nada que lo impida.
 
 ---
 
@@ -504,46 +514,25 @@ Otras dos reglas que ahorran dolores de cabeza:
 ## Comandos útiles
 
 ```bash
-npm run go             # Expo Go
-npm run go:tunnel      # Expo Go a través de túnel (redes restringidas)
-npm run go:clear       # Expo Go limpiando caché
-npm run doctor         # diagnostica versiones incompatibles
-
 npm run start:reset    # Metro limpiando caché
 npm run clean:metro    # borra caché de Metro y watchman
 npm run clean:android  # gradlew clean
-npm run android:release
+npm run android:release  # APK autónomo, sin cable
 npm run ios:release
 ```
 
 ---
 
-## Para adaptar la plantilla a un proyecto nuevo
+## Cosas que querrás añadir
 
-1. Renombra la app: `app.json`, `app.config.ts` y los identificadores nativos
-   en `android/` e `ios/`.
-2. Ajusta `linking.ts` y el `scheme` de `app.config.ts` con tus deep links.
-3. Cambia la paleta en `src/theme/colors.ts`.
-4. Borra las features de ejemplo (`posts/`) y apunta `API_URL` a tu backend.
-5. Sustituye el login simulado de `features/auth/hooks/useSignIn.ts` por la
-   llamada real.
-
-### Cosas que querrás añadir en un proyecto real
-
-Éstas rompen la compatibilidad con Expo Go y requieren build nativa:
-
-- **Imágenes optimizadas**: `expo-image` (caché, blurhash, menos memoria).
-  Requiere `npx expo prebuild`. El punto de cambio es
-  `src/components/ui/Image.tsx`, un solo archivo.
 - **Iconos**: `react-native-vector-icons` (los tabs usan emoji a propósito).
 - **Tabs nativos**: `react-native-bottom-tabs`.
-
-Éstas funcionan en los dos flujos:
-
 - **Monitoreo**: Sentry o Crashlytics, conectados dentro de `logger.error`.
 - **i18n**: `i18next` + `react-i18next` si necesitas más de un idioma.
 
-Ya instaladas y en uso, no hace falta añadirlas: **Reanimated** (4.5.1, para
-los sensores del nivel; anima sólo `transform` y `opacity`, que corren en la
-GPU) y **Skia** (2.6.2, para fundir el fantasma en la foto). Ambas versiones
-están fijadas a las que trae Expo Go SDK 57: no las subas sin cambiar de SDK.
+Ya instaladas y en uso: **Reanimated** (para los sensores del nivel; anima
+sólo `transform` y `opacity`, que corren en la GPU) y **Skia** (para fundir el
+fantasma en la foto).
+
+Al añadir cualquier librería con código nativo hay que **recompilar**
+(`npm run android`, o `npm run pods && npm run ios`): recargar Metro no basta.

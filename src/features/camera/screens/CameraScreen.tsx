@@ -13,31 +13,27 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '@/components/ui/Button';
 import { Text } from '@/components/ui/Text';
 import type { RootScreenProps } from '@/navigation/types';
-import { useCameraStore } from '@/store/cameraStore';
+import { selectActiveGuide, useCameraStore } from '@/store/cameraStore';
 import { makeStyles, useTheme } from '@/theme';
 
+import { useCompositionAnalysis } from '../ai/hooks/useCompositionAnalysis';
 import { CameraViewport } from '../components/CameraViewport';
-import { HudChip } from '../components/controls/HudChip';
+import { CameraTopBar } from '../components/controls/CameraTopBar';
 import { HudIconButton } from '../components/controls/HudIconButton';
+import { ModeSelector } from '../components/controls/ModeSelector';
 import { ShutterButton } from '../components/controls/ShutterButton';
 import { Glyph } from '../components/Glyph';
 import { AspectMask, useAspectInsets } from '../components/overlays/AspectMask';
 import { GhostOverlay } from '../components/overlays/GhostOverlay';
 import { GuideOverlay } from '../components/overlays/GuideOverlay';
 import { LevelIndicator } from '../components/overlays/LevelIndicator';
+import { ViewfinderFrame } from '../components/overlays/ViewfinderFrame';
 import { ProPanel } from '../components/panels/ProPanel';
-import { FLASH_MODES, type FlashKind } from '../constants/guides';
 import { useAutoShutter } from '../hooks/useAutoShutter';
 import { useCameraPermission } from '../hooks/useCameraPermission';
 import { useCapture } from '../hooks/useCapture';
 import { useCountdown } from '../hooks/useCountdown';
 import { useDeviceTilt } from '../hooks/useDeviceTilt';
-
-const NEXT_FLASH: Record<FlashKind, FlashKind> = {
-  off: 'auto',
-  auto: 'on',
-  on: 'off',
-};
 
 /**
  * Pantalla del visor.
@@ -51,16 +47,16 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
 
-  const guide = useCameraStore(state => state.guide);
+  // En automático manda la sugerencia del asistente; en manual, tu elección.
+  const guide = useCameraStore(selectActiveGuide);
+  const guideMode = useCameraStore(state => state.guideMode);
   const aspect = useCameraStore(state => state.aspect);
   const flash = useCameraStore(state => state.flash);
-  const setFlash = useCameraStore(state => state.setFlash);
   const timer = useCameraStore(state => state.timer);
   const facing = useCameraStore(state => state.facing);
   const toggleFacing = useCameraStore(state => state.toggleFacing);
   const zoom = useCameraStore(state => state.zoom);
-  const proMode = useCameraStore(state => state.proMode);
-  const toggleProMode = useCameraStore(state => state.toggleProMode);
+  const mode = useCameraStore(state => state.mode);
   const levelOn = useCameraStore(state => state.levelOn);
   const autoShutter = useCameraStore(state => state.autoShutter);
   const ghostUri = useCameraStore(state => state.ghostUri);
@@ -71,6 +67,7 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
   const { cameraRef, isCapturing, capture } = useCapture();
   const countdown = useCountdown();
   const tilt = useDeviceTilt(levelOn);
+  const compositionFrameOutput = useCompositionAnalysis(guideMode === 'auto');
 
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const aspectInsets = useAspectInsets(aspect, viewport.width, viewport.height);
@@ -128,10 +125,6 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
     },
   });
 
-  const cycleFlash = useCallback(() => {
-    setFlash(NEXT_FLASH[flash]);
-  }, [flash, setFlash]);
-
   const openGallery = useCallback(() => {
     navigation.navigate('Galeria');
   }, [navigation]);
@@ -139,9 +132,6 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
   const openSettings = useCallback(() => {
     navigation.navigate('Ajustes');
   }, [navigation]);
-
-  const flashLabel =
-    FLASH_MODES.find(mode => mode.kind === flash)?.label ?? 'Off';
 
   return (
     <View style={styles.root}>
@@ -153,13 +143,13 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
 
       {/* ——— Visor y superposiciones ——— */}
       <View style={styles.viewport} onLayout={onViewportLayout}>
-        {permission.status === 'concedido' ||
-        permission.status === 'sin-modulo' ? (
+        {permission.status === 'concedido' ? (
           <CameraViewport
             facing={facing}
             flash={flash}
             zoom={zoom}
             cameraRef={cameraRef}
+            compositionFrameOutput={compositionFrameOutput}
           />
         ) : null}
 
@@ -212,6 +202,7 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
             },
           ]}
         >
+          <ViewfinderFrame width={visibleWidth} height={visibleHeight} />
           <GuideOverlay
             kind={guide}
             width={visibleWidth}
@@ -241,28 +232,10 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
         />
       </View>
 
-      {/* ——— Barra superior ——— */}
-      <View style={[styles.topBar, { top: insets.top + theme.spacing.sm }]}>
-        <HudIconButton
-          icon="ajustes"
-          onPress={openSettings}
-          accessibilityLabel="Abrir ajustes"
-        />
-        <View style={styles.topRight}>
-          <HudChip
-            label={`Flash ${flashLabel}`}
-            icon={flash === 'off' ? 'rayoOff' : 'rayo'}
-            active={flash !== 'off'}
-            onPress={cycleFlash}
-            accessibilityLabel={`Flash: ${flashLabel}`}
-          />
-          <HudChip
-            label="Pro"
-            active={proMode}
-            onPress={toggleProMode}
-            accessibilityLabel="Modo PRO"
-          />
-        </View>
+      {/* ——— Barra superior: flash, HDR, formato, temporizador, ajustes ——— */}
+      <View style={[styles.topScrim, { height: insets.top + 76 }]} />
+      <View style={[styles.topBar, { top: insets.top + theme.spacing.xs }]}>
+        <CameraTopBar onOpenSettings={openSettings} />
       </View>
 
       {/* ——— Zona inferior ——— */}
@@ -272,7 +245,9 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
           { paddingBottom: insets.bottom + theme.spacing.md },
         ]}
       >
-        {proMode ? <ProPanel /> : null}
+        {mode === 'pro' ? <ProPanel /> : null}
+
+        <ModeSelector />
 
         <View style={styles.mainBar}>
           <Pressable
@@ -358,24 +333,28 @@ const useStyles = makeStyles(theme => ({
     ...StyleSheet.absoluteFill,
     backgroundColor: theme.hud.shutterInner,
   },
+  topScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: theme.hud.mask,
+  },
   topBar: {
     position: 'absolute',
-    left: theme.spacing.lg,
-    right: theme.spacing.lg,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    left: theme.spacing.xs,
+    right: theme.spacing.xs,
   },
-  topRight: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-  },
+  // La trama oscura cubre todo el bloque inferior (panel PRO incluido), para
+  // que los controles se lean igual sobre una escena clara.
   bottomArea: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    gap: theme.spacing.md,
+    paddingTop: theme.spacing.sm,
+    gap: theme.spacing.sm,
+    backgroundColor: theme.hud.mask,
   },
   mainBar: {
     flexDirection: 'row',

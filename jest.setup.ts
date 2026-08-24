@@ -44,38 +44,35 @@ jest.mock('react-native-keychain', () => {
   };
 });
 
-// Módulos de Expo de la cámara: stubs mínimos, sin puente nativo.
-jest.mock('expo-camera', () => ({
-  CameraView: require('react-native').View,
-  Camera: {
-    getCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
-    requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
-  },
-}));
-
-jest.mock('expo-haptics', () => ({
-  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium' },
-  impactAsync: jest.fn(async () => undefined),
-}));
-
-jest.mock('expo-media-library/legacy', () => ({
-  requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
-  getPermissionsAsync: jest.fn(async () => ({ granted: true })),
-  saveToLibraryAsync: jest.fn(async () => undefined),
-  getAssetsAsync: jest.fn(async () => ({ assets: [] })),
-  SortBy: { creationTime: 'creationTime' },
-}));
-
-// Cámara nativa (build sin Expo): stubs mínimos.
+// Cámara nativa: stubs mínimos, sin puente nativo.
 jest.mock('react-native-vision-camera', () => ({
   Camera: require('react-native').View,
   VisionCamera: {
     cameraPermissionStatus: 'authorized',
     requestCameraPermission: jest.fn(async () => true),
   },
+  useCameraDevice: jest.fn(() => ({ id: 'back-0', position: 'back' })),
   usePhotoOutput: jest.fn(() => ({
     capturePhotoToFile: jest.fn(async () => ({ filePath: '/tmp/foto.jpg' })),
   })),
+  // El asistente de composición no tiene frames que analizar en tests: el
+  // output es un objeto opaco y `onFrame` nunca se llama.
+  useFrameOutput: jest.fn(() => ({ thread: 'mock-thread' })),
+  HybridFrameConverter: {
+    convertFrameToImage: jest.fn(),
+  },
+  CommonResolutions: { VGA_16_9: { width: 480, height: 854 } },
+}));
+
+// Motor de composición: HybridObject de Nitro implementado en C++ propio
+// (android/app/src/main/jni/composition/), sin puente nativo en tests.
+jest.mock('react-native-nitro-modules', () => ({
+  NitroModules: {
+    createHybridObject: jest.fn(() => ({
+      loadModelFromAsset: jest.fn(async () => undefined),
+      analyze: jest.fn(() => new ArrayBuffer(0)),
+    })),
+  },
 }));
 
 jest.mock('@react-native-camera-roll/camera-roll', () => ({

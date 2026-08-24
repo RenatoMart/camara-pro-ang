@@ -1,0 +1,5 @@
+<resources>
+    <!-- Sobrescribe el nombre sólo en la build de debug, para distinguirla de
+         la de release en el lanzador de aplicaciones. -->
+    <string name="app_name">CamaraPro dev</string>
+</resources>

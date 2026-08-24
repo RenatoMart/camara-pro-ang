@@ -4,12 +4,13 @@ describe('useCameraStore', () => {
   beforeEach(() => {
     useCameraStore.setState({
       guide: 'tercios',
+      mode: 'foto',
       aspect: 'sensor',
       flash: 'off',
+      hdr: 'off',
       timer: 0,
       levelOn: false,
       autoShutter: false,
-      proMode: false,
       facing: 'back',
       zoom: 0,
       ghostUri: null,
@@ -22,16 +23,25 @@ describe('useCameraStore', () => {
     expect(useCameraStore.getState().guide).toBe('tercios');
   });
 
-  it('cambia guía, formato y flash', () => {
+  it('cambia guía, formato, flash y HDR', () => {
     const state = useCameraStore.getState();
     state.setGuide('espiral');
     state.setAspect('9:16');
     state.setFlash('auto');
+    state.setHdr('on');
 
     const next = useCameraStore.getState();
     expect(next.guide).toBe('espiral');
     expect(next.aspect).toBe('9:16');
     expect(next.flash).toBe('auto');
+    expect(next.hdr).toBe('on');
+  });
+
+  it('arranca en modo foto y cambia de modo', () => {
+    expect(useCameraStore.getState().mode).toBe('foto');
+
+    useCameraStore.getState().setMode('pro');
+    expect(useCameraStore.getState().mode).toBe('pro');
   });
 
   it('alterna cámara trasera/frontal', () => {
@@ -57,12 +67,25 @@ describe('useCameraStore', () => {
     const state = useCameraStore.getState();
     state.toggleLevel();
     state.toggleAutoShutter();
-    state.toggleProMode();
 
     const next = useCameraStore.getState();
     expect(next.levelOn).toBe(true);
     expect(next.autoShutter).toBe(true);
-    expect(next.proMode).toBe(true);
+  });
+
+  it('el disparo automático enciende el nivel, del que depende', () => {
+    useCameraStore.getState().toggleAutoShutter();
+
+    const conAuto = useCameraStore.getState();
+    expect(conAuto.autoShutter).toBe(true);
+    expect(conAuto.levelOn).toBe(true);
+
+    // Apagarlo no toca el nivel: puede seguir sirviendo por su cuenta.
+    useCameraStore.getState().toggleAutoShutter();
+
+    const sinAuto = useCameraStore.getState();
+    expect(sinAuto.autoShutter).toBe(false);
+    expect(sinAuto.levelOn).toBe(true);
   });
 
   it('guarda la última foto y el fantasma', () => {

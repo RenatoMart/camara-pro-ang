@@ -13,31 +13,11 @@ export type ImageProps = RNImageProps;
  * `Image` desde `@/components/ui`, nunca desde el paquete. Así, cambiar la
  * implementación de todas las imágenes de la app es tocar un solo archivo.
  *
- * ## Cómo migrar a expo-image (recomendado en producción)
+ * ## Si necesitas caché y placeholders
  *
- * `expo-image` aporta caché en memoria y disco, placeholders con blurhash,
- * carga progresiva y bastante menos uso de memoria — importa sobre todo
- * dentro de listas. Aquí no viene por defecto porque es un módulo de Expo:
- * funciona en Expo Go, pero requiere `expo-modules-core` enlazado en
- * `android/` e `ios/` para las builds nativas, y `install-expo-modules`
- * todavía no soporta React Native 0.86.
- *
- * Cuando quieras dar el salto:
- *
- * ```bash
- * npx expo install expo-image
- * npx expo prebuild   # regenera android/ e ios/ con los módulos de Expo
- * ```
- *
- * y cambia sólo este archivo:
- *
- * ```tsx
- * import { Image as ExpoImage } from 'expo-image';
- *
- * export function Image(props: ImageProps) {
- *   return <ExpoImage contentFit="cover" transition={120} {...props} />;
- * }
- * ```
+ * El proyecto ya usa `react-native-nitro-image`, que aporta carga eficiente y
+ * thumbhash. Si algún día hace falta más (caché en disco, carga progresiva),
+ * el cambio se hace **sólo aquí**, sin tocar el resto de la app.
  *
  * ## Rendimiento en listas
  *

@@ -16,6 +16,11 @@ export type HudIconButtonProps = {
 
 /**
  * Botón redondo de icono del HUD, con área táctil mínima de 44 px.
+ *
+ * Sin píldora de cristal detrás: el glifo va suelto sobre el visor, como en
+ * cualquier cámara de toda la vida. La legibilidad sobre escenas claras la
+ * da la trama oscura que ya cubre las barras superior e inferior, no un
+ * fondo propio del botón.
  */
 export const HudIconButton = memo(function HudIconButtonBase({
   icon,
@@ -49,20 +54,15 @@ export const HudIconButton = memo(function HudIconButtonBase({
   );
 });
 
-const useStyles = makeStyles(theme => ({
+const useStyles = makeStyles(() => ({
   button: {
     width: MIN_TOUCH_SIZE,
     height: MIN_TOUCH_SIZE,
-    borderRadius: theme.radius.full,
-    ...theme.roundedCorner,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.hud.glass,
-    borderWidth: 1,
-    borderColor: theme.hud.glassBorder,
   },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   disabled: {
     opacity: 0.4,

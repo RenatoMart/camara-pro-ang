@@ -127,7 +127,7 @@ export function goldenTriangleLines(
  * - `cuadricula`: cuartos, para precisión geométrica.
  */
 export function gridFractions(
-  kind: 'tercios' | 'phi' | 'cuadricula',
+  kind: 'tercios' | 'phi' | 'cuadricula' | 'patron',
 ): number[] {
   if (kind === 'tercios') {
     return [1 / 3, 2 / 3];
@@ -135,7 +135,111 @@ export function gridFractions(
   if (kind === 'phi') {
     return [1 - 1 / PHI, 1 / PHI];
   }
+  if (kind === 'patron') {
+    // Retícula densa: ayuda a alinear repeticiones (ventanas, baldosas…).
+    return [1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6];
+  }
   return [0.25, 0.5, 0.75];
+}
+
+/**
+ * Franjas de "aire": los márgenes que conviene dejar vacíos alrededor del
+ * sujeto para que respire (espacio negativo).
+ */
+export function negativeSpaceInsets(width: number, height: number): CropInsets {
+  return {
+    top: round(height / 4),
+    bottom: round(height / 4),
+    left: round(width / 4),
+    right: round(width / 4),
+  };
+}
+
+/**
+ * Las dos diagonales del encuadre.
+ *
+ * El modelo sabe *si* la composición es diagonal, pero no en qué sentido: el
+ * volteo horizontal del entrenamiento lo dejó ciego a la dirección. Mientras
+ * no exista el cálculo geométrico que la determine, se dibujan las dos y es el
+ * ojo quien elige.
+ */
+export function diagonalLines(width: number, height: number): LineSegment[] {
+  return [
+    { x1: 0, y1: 0, x2: width, y2: height },
+    { x1: 0, y1: height, x2: width, y2: 0 },
+  ];
+}
+
+/**
+ * Curva en S: el recorrido serpenteante clásico de caminos, ríos y costas.
+ *
+ * Se traza con dos curvas cúbicas simétricas respecto al centro, de abajo a
+ * arriba, porque es como se recorre una escena en profundidad.
+ */
+export function sCurvePath(width: number, height: number): string {
+  if (width <= 0 || height <= 0) {
+    return '';
+  }
+
+  const x = (f: number) => round(width * f);
+  const y = (f: number) => round(height * f);
+
+  return [
+    `M ${x(0.3)} ${y(1)}`,
+    `C ${x(0.3)} ${y(0.75)} ${x(0.7)} ${y(0.68)} ${x(0.7)} ${y(0.5)}`,
+    `C ${x(0.7)} ${y(0.32)} ${x(0.3)} ${y(0.25)} ${x(0.3)} ${y(0)}`,
+  ].join(' ');
+}
+
+/**
+ * Marco central para composiciones centradas.
+ *
+ * Es el rectángulo del tercio medio: encuadra el sujeto sin taparlo, que es
+ * justo lo contrario de la retícula de tercios.
+ */
+export function centerFrame(
+  width: number,
+  height: number,
+): { x: number; y: number; width: number; height: number } {
+  return {
+    x: round(width / 3),
+    y: round(height / 3),
+    width: round(width / 3),
+    height: round(height / 3),
+  };
+}
+
+/**
+ * Líneas radiales que convergen en un punto de fuga.
+ *
+ * `point` va en fracciones 0..1 del encuadre. Por defecto el centro: cuando
+ * exista el cálculo geométrico podrá moverse a donde converjan de verdad las
+ * líneas de la escena.
+ */
+export function vanishingLines(
+  width: number,
+  height: number,
+  point: { x: number; y: number } = { x: 0.5, y: 0.5 },
+  rays = 12,
+): LineSegment[] {
+  if (width <= 0 || height <= 0 || rays <= 0) {
+    return [];
+  }
+
+  const cx = width * point.x;
+  const cy = height * point.y;
+  // Suficiente para salirse del encuadre desde cualquier punto interior.
+  const reach = Math.hypot(width, height);
+
+  return Array.from({ length: rays }, (_, i) => {
+    const angle = (i * 2 * Math.PI) / rays;
+    return {
+      x1: round(cx),
+      y1: round(cy),
+      x2: round(cx + Math.cos(angle) * reach),
+      y2: round(cy + Math.sin(angle) * reach),
+    };
+  });
 }
 
 export type CropInsets = {
@@ -172,19 +276,55 @@ export function aspectCropInsets(
   };
 }
 
+/** Cómo se está sosteniendo el teléfono, en cuartos de vuelta. */
+export type DeviceOrientation =
+  | 'vertical'
+  | 'vertical-invertido'
+  | 'horizontal-izquierda'
+  | 'horizontal-derecha';
+
 export type Tilt = {
-  /** Rotación en el plano de la pantalla (horizonte torcido), en grados. */
+  /**
+   * Desviación del horizonte respecto a la forma en que sostienes el
+   * teléfono, en grados y siempre dentro de ±45.
+   */
   roll: number;
   /** Inclinación adelante/atrás, en grados. 0 = teléfono vertical. */
   pitch: number;
+  /** Cuarto de vuelta al que está más cerca el teléfono. */
+  orientation: DeviceOrientation;
 };
+
+/** El cuarto de vuelta (en grados) al que corresponde cada orientación. */
+function orientationFromQuarter(quarter: number): DeviceOrientation {
+  // `quarter` viene ya redondeado a -180, -90, 0, 90 o 180.
+  if (quarter === 90) {
+    return 'horizontal-derecha';
+  }
+  if (quarter === -90) {
+    return 'horizontal-izquierda';
+  }
+  if (quarter === 0) {
+    return 'vertical';
+  }
+  return 'vertical-invertido';
+}
 
 /**
  * Convierte una lectura del acelerómetro (gravedad, en g) a inclinación.
  *
- * Con el teléfono en vertical: `roll` ≈ 0 si el horizonte está recto y crece
- * al girar el teléfono en el plano de la pantalla; `pitch` ≈ 0 en vertical y
- * ±90° con el teléfono tumbado (cenital).
+ * El `roll` se mide **respecto al cuarto de vuelta más cercano**, no respecto
+ * a la vertical absoluta. Esto es lo que hace que el nivel sirva también con
+ * el teléfono en horizontal: antes se comparaba siempre contra la vertical,
+ * así que al girar el móvil 90° el nivel leía 90° de desvío y no se ponía
+ * verde nunca por muy recto que estuviera el horizonte.
+ *
+ * Con la corrección, `roll` es siempre cuánto falta para que el borde del
+ * teléfono quede paralelo al horizonte, sostengas el móvil como lo sostengas,
+ * y por eso nunca sale de ±45°.
+ *
+ * `pitch` no cambia: ±90° con el teléfono tumbado (cenital). Ahí el `roll`
+ * pierde sentido porque no hay horizonte contra el que compararse.
  */
 export function tiltFromGravity(reading: {
   x: number;
@@ -194,11 +334,19 @@ export function tiltFromGravity(reading: {
   const { x, y, z } = reading;
   const toDegrees = 180 / Math.PI;
 
-  // |y| desacopla el cálculo del convenio de signos de cada plataforma.
-  const roll = Math.atan2(x, Math.abs(y)) * toDegrees;
+  // Giro completo en el plano de la pantalla: 0 = vertical, ±90 = horizontal,
+  // ±180 = boca abajo.
+  const screenAngle = Math.atan2(x, -y) * toDegrees;
+  const quarter = Math.round(screenAngle / 90) * 90;
+
+  const roll = screenAngle - quarter;
   const pitch = Math.atan2(z, Math.hypot(x, y)) * toDegrees;
 
-  return { roll: round(roll), pitch: round(pitch) };
+  return {
+    roll: round(roll),
+    pitch: round(pitch),
+    orientation: orientationFromQuarter(quarter),
+  };
 }
 
 /**

@@ -1,0 +1,14 @@
+rule_of_thirds
+vertical
+horizontal
+diagonal
+curved
+triangle
+center
+symmetric
+pattern
+vanishing_point
+shallow_dof
+color_blocking
+tonal_contrast
+negative_space

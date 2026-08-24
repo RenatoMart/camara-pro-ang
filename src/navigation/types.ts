@@ -20,7 +20,12 @@ export type MainTabParamList = {
 export type RootStackParamList = {
   // — App de cámara —
   Camara: undefined;
-  Galeria: undefined;
+  /**
+   * Sin parámetros es la galería de siempre. Con `modo: 'fantasma'` se abre
+   * para elegir qué foto se superpone en el visor: al tocar una, la fija y
+   * vuelve a la cámara en lugar de abrir el detalle.
+   */
+  Galeria: { modo?: 'fantasma' } | undefined;
   FotoDetalle: { uri: string };
   Ajustes: undefined;
 
