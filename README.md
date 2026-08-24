@@ -3,6 +3,10 @@
 App de cámara con guías de composición avanzadas y asistentes en tiempo
 real, sobre React Native 0.86 (New Architecture) y TypeScript estricto.
 
+| Visor                                               | Modo fantasma                                         | Disparo automático                                                         |
+| --------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| ![Visor normal](docs/screenshots/visor-normal.jpeg) | ![Modo fantasma](docs/screenshots/modo-fantasma.jpeg) | ![Disparo automático al nivelar](docs/screenshots/disparo-automatico.jpeg) |
+
 ---
 
 ## La app: Cámara PRO
