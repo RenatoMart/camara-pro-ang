@@ -1,8 +1,8 @@
-import { Skia, ImageFormat, type SkImage } from '@shopify/react-native-skia';
+import { Skia } from '@shopify/react-native-skia';
 
 import { logger } from '@/utils/logger';
 
-import { loadImage } from '../services/nativeModules';
+import { decodeImage, encodeToJpegFile } from './skiaImageIO';
 
 /**
  * Funde la superposición fantasma dentro de la foto recién capturada.
@@ -18,26 +18,16 @@ import { loadImage } from '../services/nativeModules';
  * escribe `nitro-image` en la caché temporal.
  */
 
-/** Calidad JPEG del archivo compuesto (0..100). */
-const JPEG_QUALITY = 92;
-
 /**
  * Tope de tiempo para fundir el fantasma.
  *
- * Decodificar la foto y el fantasma depende de dónde salgan sus archivos: una
- * imagen del carrete llega como `content://` y su lectura puede quedarse
- * esperando indefinidamente. Sin este tope, ese cuelgue se llevaba por
- * delante toda la captura —el disparador se quedaba girando para siempre y la
- * foto no se guardaba nunca—. Agotado el plazo se guarda la toma limpia, que
- * siempre es mejor que perderla.
+ * Red de seguridad, no la defensa principal: `decodeImage` (`skiaImageIO.ts`)
+ * ya sabe leer tanto `file://` como `content://` (el fantasma elegido de la
+ * galería) de forma fiable. Esto sigue aquí por si el archivo es enorme, sale
+ * de un almacenamiento lento, o falla algo imprevisto: mejor guardar la toma
+ * limpia a los pocos segundos que dejar el disparador esperando para siempre.
  */
 const COMPOSE_TIMEOUT_MS = 10_000;
-
-/** Carga un archivo de imagen en memoria como imagen de Skia. */
-async function decode(uri: string): Promise<SkImage | null> {
-  const data = await Skia.Data.fromURI(uri);
-  return Skia.Image.MakeImageFromEncoded(data);
-}
 
 /**
  * Dibuja `ghost` cubriendo por completo el lienzo de `base`, recortando lo que
@@ -63,37 +53,6 @@ export function coverRect(
     width,
     height,
   };
-}
-
-/** Escribe los bytes JPEG a un archivo temporal y devuelve su uri. */
-async function writeJpeg(image: SkImage): Promise<string> {
-  const bytes = image.encodeToBytes(ImageFormat.JPEG, JPEG_QUALITY);
-  const saved = await loadImage({
-    encodedImageData: {
-      buffer: toArrayBuffer(bytes),
-      width: image.width(),
-      height: image.height(),
-      imageFormat: 'jpg',
-    },
-  });
-  const path = await saved.saveToTemporaryFileAsync('jpg', JPEG_QUALITY);
-  return `file://${path}`;
-}
-
-/**
- * Saca el `ArrayBuffer` que corresponde exactamente a estos bytes.
- *
- * Un `Uint8Array` puede ser una ventana sobre un buffer mayor, así que pasar
- * `.buffer` a ciegas entregaría bytes de más y el JPEG saldría corrupto. Sólo
- * se copia cuando la vista no cubre el buffer entero.
- */
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const cubreTodo =
-    bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength;
-
-  return cubreTodo
-    ? (bytes.buffer as ArrayBuffer)
-    : (bytes.slice().buffer as ArrayBuffer);
 }
 
 /**
@@ -128,8 +87,8 @@ async function compose(
 ): Promise<string | null> {
   try {
     const [base, ghost] = await Promise.all([
-      decode(photoUri),
-      decode(ghostUri),
+      decodeImage(photoUri),
+      decodeImage(ghostUri),
     ]);
 
     if (base == null || ghost == null) {
@@ -163,7 +122,7 @@ async function compose(
     );
 
     surface.flush();
-    return await writeJpeg(surface.makeImageSnapshot());
+    return await encodeToJpegFile(surface.makeImageSnapshot());
   } catch (error) {
     logger.error('No se pudo fundir el fantasma en la foto', error);
     return null;

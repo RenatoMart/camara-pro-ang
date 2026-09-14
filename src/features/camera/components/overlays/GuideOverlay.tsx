@@ -22,7 +22,14 @@ export type GuideOverlayProps = {
   height: number;
 };
 
-const HAIRLINE = StyleSheet.hairlineWidth;
+/**
+ * Grosor de las líneas de guía.
+ *
+ * El `StyleSheet.hairlineWidth` de siempre (≈0.3-1px según densidad) se
+ * pierde contra una escena con detalle: para una guía que hay que leer de un
+ * vistazo mientras encuadras, hace falta un trazo bien visible.
+ */
+const LINE_WIDTH = 1.75;
 
 /**
  * Superposición de guías de composición sobre el área visible del visor.
@@ -88,13 +95,13 @@ function GridGuide({
           <View
             style={[
               styles.line,
-              { left: fraction * width, width: HAIRLINE, height },
+              { left: fraction * width, width: LINE_WIDTH, height },
             ]}
           />
           <View
             style={[
               styles.line,
-              { top: fraction * height, height: HAIRLINE, width },
+              { top: fraction * height, height: LINE_WIDTH, width },
             ]}
           />
         </React.Fragment>
@@ -112,7 +119,7 @@ function SpiralGuide({ width, height }: GuideSize) {
       <Path
         d={path}
         stroke={theme.hud.gridLineStrong}
-        strokeWidth={1}
+        strokeWidth={LINE_WIDTH}
         fill="none"
       />
     </Svg>
@@ -136,7 +143,7 @@ function TrianglesGuide({ width, height }: GuideSize) {
           x2={line.x2}
           y2={line.y2}
           stroke={theme.hud.gridLine}
-          strokeWidth={1}
+          strokeWidth={LINE_WIDTH}
         />
       ))}
     </Svg>
@@ -156,7 +163,7 @@ function CrossGuide({ width, height }: GuideSize) {
         x2={width / 2}
         y2={height}
         stroke={theme.hud.gridLine}
-        strokeWidth={1}
+        strokeWidth={LINE_WIDTH}
       />
       <Line
         x1={0}
@@ -164,14 +171,14 @@ function CrossGuide({ width, height }: GuideSize) {
         x2={width}
         y2={height / 2}
         stroke={theme.hud.gridLine}
-        strokeWidth={1}
+        strokeWidth={LINE_WIDTH}
       />
       <Circle
         cx={width / 2}
         cy={height / 2}
         r={radius}
         stroke={theme.hud.gridLineStrong}
-        strokeWidth={1}
+        strokeWidth={LINE_WIDTH}
         fill="none"
       />
     </Svg>
@@ -198,7 +205,7 @@ function AxisGuide({
             key={fraction}
             style={[
               styles.line,
-              { left: fraction * width, width: HAIRLINE, height },
+              { left: fraction * width, width: LINE_WIDTH, height },
             ]}
           />
         ) : (
@@ -206,7 +213,7 @@ function AxisGuide({
             key={fraction}
             style={[
               styles.line,
-              { top: fraction * height, height: HAIRLINE, width },
+              { top: fraction * height, height: LINE_WIDTH, width },
             ]}
           />
         ),
@@ -230,7 +237,7 @@ function DiagonalGuide({ width, height }: GuideSize) {
           x2={line.x2}
           y2={line.y2}
           stroke={theme.hud.gridLine}
-          strokeWidth={1}
+          strokeWidth={LINE_WIDTH}
         />
       ))}
     </Svg>
@@ -247,7 +254,7 @@ function CurveGuide({ width, height }: GuideSize) {
       <Path
         d={path}
         stroke={theme.hud.gridLineStrong}
-        strokeWidth={1}
+        strokeWidth={LINE_WIDTH}
         fill="none"
       />
     </Svg>
@@ -267,7 +274,7 @@ function CenterGuide({ width, height }: GuideSize) {
         width={frame.width}
         height={frame.height}
         stroke={theme.hud.gridLineStrong}
-        strokeWidth={1}
+        strokeWidth={LINE_WIDTH}
         fill="none"
       />
     </Svg>
@@ -289,7 +296,7 @@ function VanishingGuide({ width, height }: GuideSize) {
           x2={line.x2}
           y2={line.y2}
           stroke={theme.hud.gridLine}
-          strokeWidth={1}
+          strokeWidth={LINE_WIDTH}
         />
       ))}
       <Circle
@@ -297,7 +304,7 @@ function VanishingGuide({ width, height }: GuideSize) {
         cy={height / 2}
         r={Math.min(width, height) / 22}
         stroke={theme.hud.gridLineStrong}
-        strokeWidth={1}
+        strokeWidth={LINE_WIDTH}
         fill="none"
       />
     </Svg>
@@ -320,7 +327,7 @@ function AirGuide({ width, height }: GuideSize) {
         width={width - insets.left - insets.right}
         height={height - insets.top - insets.bottom}
         stroke={theme.hud.gridLineStrong}
-        strokeWidth={1}
+        strokeWidth={LINE_WIDTH}
         strokeDasharray="6 6"
         fill="none"
       />

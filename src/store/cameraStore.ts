@@ -11,6 +11,7 @@ import type {
   TimerKind,
 } from '@/features/camera/constants/guides';
 import type { CameraMode } from '@/features/camera/constants/modes';
+import type { VideoQualityKind } from '@/features/camera/constants/videoQuality';
 import { StorageKeys } from '@/services/storage';
 
 /**
@@ -18,8 +19,8 @@ import { StorageKeys } from '@/services/storage';
  *
  * Se divide en dos bloques: preferencias (guía elegida, formato, flash…) que
  * se persisten para que la cámara arranque como la dejaste, y estado de
- * sesión (zoom, fantasma, última foto) que muere con la app: `partialize`
- * sólo guarda lo primero.
+ * sesión (zoom, EV, fantasma, última foto) que muere con la app:
+ * `partialize` sólo guarda lo primero.
  */
 
 type CameraPrefs = {
@@ -44,6 +45,15 @@ type CameraPrefs = {
   flash: FlashKind;
   hdr: HdrKind;
   timer: TimerKind;
+  /**
+   * Calidad de grabación elegida (720p/1080p/4K).
+   *
+   * Es la preferencia, no necesariamente la que se usa: si el sensor del
+   * teléfono no llega a ella, `useVideoRecording` la degrada sola a la mejor
+   * que sí admite (ver `utils/videoCapabilities.ts`), sin tocar esta
+   * preferencia — así que al cambiar a un teléfono mejor, vuelve a pedirla.
+   */
+  videoQuality: VideoQualityKind;
   /** Nivel de horizonte visible. */
   levelOn: boolean;
   /** Disparo automático al nivelar. */
@@ -67,8 +77,24 @@ type CameraSession = {
    */
   suggestedGuide: GuideKind | null;
   facing: 'back' | 'front';
-  /** Zoom normalizado 0..1, como lo espera expo-camera. */
+  /**
+   * Factor de zoom real (1 = angular normal), el mismo número que espera
+   * `<Camera zoom>` de VisionCamera y el que se enseña en pantalla («1×»,
+   * «2,3×»…). No es un valor normalizado: sus límites dependen del sensor
+   * (`device.minZoom`/`maxZoom`), así que los aplica quien conoce el
+   * dispositivo — el gesto de pellizco y el selector rápido — no el store.
+   */
   zoom: number;
+  /**
+   * Compensación de exposición (EV) tal como la ve el usuario: siempre
+   * -4..+4, igual en cualquier teléfono (`FRIENDLY_EV_RANGE` en
+   * `constants/manualControls.ts`). `CameraViewport` la traduce al índice
+   * crudo que de verdad espera el sensor antes de aplicarla — ver el
+   * porqué en ese archivo. `0` es el neutro, siempre el valor de partida:
+   * a diferencia del zoom, no tiene sentido recordarlo entre arranques,
+   * cada escena pide el suyo.
+   */
+  ev: number;
   /** Foto usada como superposición fantasma, o null. */
   ghostUri: string | null;
   ghostOpacity: number;
@@ -86,11 +112,13 @@ type CameraActions = {
   setFlash: (flash: FlashKind) => void;
   setHdr: (hdr: HdrKind) => void;
   setTimer: (timer: TimerKind) => void;
+  setVideoQuality: (quality: VideoQualityKind) => void;
   toggleLevel: () => void;
   toggleAutoShutter: () => void;
   toggleGhostBurn: () => void;
   toggleFacing: () => void;
   setZoom: (zoom: number) => void;
+  setEv: (ev: number) => void;
   setGhost: (uri: string | null) => void;
   setGhostOpacity: (opacity: number) => void;
   setLastPhoto: (uri: string) => void;
@@ -104,6 +132,7 @@ const initialPrefs: CameraPrefs = {
   flash: 'off',
   hdr: 'off',
   timer: 0,
+  videoQuality: '1080p',
   levelOn: false,
   autoShutter: false,
   ghostBurn: false,
@@ -112,13 +141,16 @@ const initialPrefs: CameraPrefs = {
 const initialSession: CameraSession = {
   suggestedGuide: null,
   facing: 'back',
-  zoom: 0,
+  zoom: 1,
+  ev: 0,
   ghostUri: null,
   ghostOpacity: 0.4,
   lastPhotoUri: null,
 };
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+/** Suelo de cordura: un factor de zoom nunca puede ser cero ni negativo. */
+const clampZoom = (value: number): number => Math.max(0.1, value);
 
 export const useCameraStore = create<
   CameraPrefs & CameraSession & CameraActions
@@ -141,6 +173,7 @@ export const useCameraStore = create<
       setFlash: flash => set({ flash }),
       setHdr: hdr => set({ hdr }),
       setTimer: timer => set({ timer }),
+      setVideoQuality: videoQuality => set({ videoQuality }),
       toggleLevel: () => set(state => ({ levelOn: !state.levelOn })),
       // El disparo automático se apoya en el nivel para saber cuándo disparar,
       // así que encenderlo enciende también el nivel: activarlo por su cuenta
@@ -152,9 +185,19 @@ export const useCameraStore = create<
             : { autoShutter: true, levelOn: true },
         ),
       toggleGhostBurn: () => set(state => ({ ghostBurn: !state.ghostBurn })),
+      // El rango de zoom (y de EV) del sensor frontal no es el del trasero;
+      // volver a los neutros evita pedirle a la cámara nueva un valor que
+      // quizá no admite.
       toggleFacing: () =>
-        set(state => ({ facing: state.facing === 'back' ? 'front' : 'back' })),
-      setZoom: zoom => set({ zoom: clamp01(zoom) }),
+        set(state => ({
+          facing: state.facing === 'back' ? 'front' : 'back',
+          zoom: 1,
+          ev: 0,
+        })),
+      setZoom: zoom => set({ zoom: clampZoom(zoom) }),
+      // Redondeado aquí también, no sólo en el control: el EV siempre va en
+      // pasos enteros de -4 a +4.
+      setEv: ev => set({ ev: Math.round(ev) }),
       setGhost: uri => set({ ghostUri: uri }),
       setGhostOpacity: opacity => set({ ghostOpacity: clamp01(opacity) }),
       setLastPhoto: uri => set({ lastPhotoUri: uri }),
@@ -195,6 +238,7 @@ export const useCameraStore = create<
         flash: state.flash,
         hdr: state.hdr,
         timer: state.timer,
+        videoQuality: state.videoQuality,
         levelOn: state.levelOn,
         autoShutter: state.autoShutter,
         ghostBurn: state.ghostBurn,

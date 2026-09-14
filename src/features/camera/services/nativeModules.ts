@@ -1,5 +1,5 @@
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
-import { Vibration } from 'react-native';
+import { NativeModules, Vibration } from 'react-native';
 import { loadImage } from 'react-native-nitro-image';
 
 /**
@@ -14,10 +14,20 @@ import { loadImage } from 'react-native-nitro-image';
  *   componentes, así que se importa donde se renderiza).
  * - Carrete → `@react-native-camera-roll/camera-roll`.
  * - Escritura de imágenes → `react-native-nitro-image`.
+ * - Lectura de `content://` → `ContentUriReader` (módulo propio, Kotlin puro
+ *   en `android/app/src/main/java/com/camaraproang/`, sin paquete de npm).
  * - Vibración → `Vibration` de React Native.
  */
 
 export { CameraRoll, loadImage };
+
+type ContentUriReaderModule = {
+  /** Bytes del `uri` dado, como base64. Sólo Android; `ContentResolver`. */
+  readAsBase64: (uri: string) => Promise<string>;
+};
+
+export const ContentUriReader =
+  NativeModules.ContentUriReader as ContentUriReaderModule;
 
 /** Vibración corta de confirmación. */
 export function hapticImpact(style: 'light' | 'medium' = 'light'): void {

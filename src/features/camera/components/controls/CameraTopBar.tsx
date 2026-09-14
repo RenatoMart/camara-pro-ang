@@ -14,12 +14,16 @@ import {
   type HdrKind,
   type TimerKind,
 } from '../../constants/guides';
+import {
+  VIDEO_QUALITIES,
+  type VideoQualityKind,
+} from '../../constants/videoQuality';
 
 import { HudLabeledButton } from './HudLabeledButton';
 import { HudMenu } from './HudMenu';
 
 /** Qué desplegable está abierto, si es que hay alguno. */
-type OpenMenu = 'aspecto' | 'temporizador' | null;
+type OpenMenu = 'aspecto' | 'calidad' | 'temporizador' | null;
 
 const NEXT_FLASH: Record<FlashKind, FlashKind> = {
   off: 'auto',
@@ -35,18 +39,33 @@ const NEXT_HDR: Record<HdrKind, HdrKind> = {
 
 export type CameraTopBarProps = {
   onOpenSettings: () => void;
+  /**
+   * En vídeo, el hueco de «relación de aspecto» pasa a ser el de «calidad»:
+   * recortar el vídeo no está implementado, y en cambio la resolución sí es
+   * su propio ajuste. Nunca hacen falta los dos a la vez.
+   */
+  isVideoMode: boolean;
+  /**
+   * Qué calidades admite de verdad el sensor (ver
+   * `utils/videoCapabilities.ts`). El menú sólo ofrece éstas: pedir una
+   * calidad que el teléfono no puede dar es peor que no ofrecerla.
+   */
+  supportedVideoQualities: readonly VideoQualityKind[];
 };
 
 /**
  * Barra de ajustes rápidos sobre el visor.
  *
  * La fila de toda la vida de una cámara de teléfono: flash, HDR, relación de
- * aspecto, temporizador y configuración. Los ajustes de dos o tres estados
- * (flash, HDR) rotan al tocarlos; los que tienen más opciones despliegan un
- * menú pequeño justo debajo, y sólo uno puede estar abierto a la vez.
+ * aspecto (o calidad, en vídeo), temporizador y configuración. Los ajustes de
+ * dos o tres estados (flash, HDR) rotan al tocarlos; los que tienen más
+ * opciones despliegan un menú pequeño justo debajo, y sólo uno puede estar
+ * abierto a la vez.
  */
 export const CameraTopBar = memo(function CameraTopBarBase({
   onOpenSettings,
+  isVideoMode,
+  supportedVideoQualities,
 }: CameraTopBarProps) {
   const styles = useStyles();
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
@@ -59,6 +78,8 @@ export const CameraTopBar = memo(function CameraTopBarBase({
   const setAspect = useCameraStore(state => state.setAspect);
   const timer = useCameraStore(state => state.timer);
   const setTimer = useCameraStore(state => state.setTimer);
+  const videoQuality = useCameraStore(state => state.videoQuality);
+  const setVideoQuality = useCameraStore(state => state.setVideoQuality);
 
   const flashLabel =
     FLASH_MODES.find(option => option.kind === flash)?.label ?? 'Off';
@@ -67,6 +88,9 @@ export const CameraTopBar = memo(function CameraTopBarBase({
   const aspectOption = ASPECTS.find(option => option.kind === aspect);
   const timerLabel =
     TIMERS.find(option => option.kind === timer)?.label ?? 'Sin';
+  const qualityOption = VIDEO_QUALITIES.find(
+    option => option.kind === videoQuality,
+  );
 
   const aspectOptions = useMemo(
     () => ASPECTS.map(option => ({ value: option.kind, label: option.label })),
@@ -75,6 +99,13 @@ export const CameraTopBar = memo(function CameraTopBarBase({
   const timerOptions = useMemo(
     () => TIMERS.map(option => ({ value: option.kind, label: option.label })),
     [],
+  );
+  const qualityOptions = useMemo(
+    () =>
+      VIDEO_QUALITIES.filter(option =>
+        supportedVideoQualities.includes(option.kind),
+      ).map(option => ({ value: option.kind, label: option.label })),
+    [supportedVideoQualities],
   );
 
   const cycleFlash = useCallback(() => {
@@ -87,6 +118,10 @@ export const CameraTopBar = memo(function CameraTopBarBase({
 
   const toggleAspectMenu = useCallback(() => {
     setOpenMenu(current => (current === 'aspecto' ? null : 'aspecto'));
+  }, []);
+
+  const toggleQualityMenu = useCallback(() => {
+    setOpenMenu(current => (current === 'calidad' ? null : 'calidad'));
   }, []);
 
   const toggleTimerMenu = useCallback(() => {
@@ -102,6 +137,14 @@ export const CameraTopBar = memo(function CameraTopBarBase({
       setOpenMenu(null);
     },
     [setAspect],
+  );
+
+  const chooseQuality = useCallback(
+    (value: VideoQualityKind) => {
+      setVideoQuality(value);
+      setOpenMenu(null);
+    },
+    [setVideoQuality],
   );
 
   const chooseTimer = useCallback(
@@ -134,16 +177,29 @@ export const CameraTopBar = memo(function CameraTopBarBase({
           onPress={cycleHdr}
           accessibilityLabel={`HDR: ${hdrLabel}`}
         />
-        <HudLabeledButton
-          icon="aspecto"
-          label={aspectOption?.short ?? 'Todo'}
-          active={aspect !== 'sensor'}
-          expanded={openMenu === 'aspecto'}
-          onPress={toggleAspectMenu}
-          accessibilityLabel={`Relación de aspecto: ${
-            aspectOption?.label ?? 'Completo'
-          }`}
-        />
+        {isVideoMode ? (
+          <HudLabeledButton
+            icon="aspecto"
+            label={qualityOption?.short ?? '—'}
+            active
+            expanded={openMenu === 'calidad'}
+            onPress={toggleQualityMenu}
+            accessibilityLabel={`Calidad de vídeo: ${
+              qualityOption?.label ?? 'detectando'
+            }`}
+          />
+        ) : (
+          <HudLabeledButton
+            icon="aspecto"
+            label={aspectOption?.short ?? 'Todo'}
+            active={aspect !== 'sensor'}
+            expanded={openMenu === 'aspecto'}
+            onPress={toggleAspectMenu}
+            accessibilityLabel={`Relación de aspecto: ${
+              aspectOption?.label ?? 'Completo'
+            }`}
+          />
+        )}
         <HudLabeledButton
           icon="temporizador"
           label={timerLabel}
@@ -166,6 +222,15 @@ export const CameraTopBar = memo(function CameraTopBarBase({
           value={aspect}
           onSelect={chooseAspect}
           accessibilityLabel="Relación de aspecto"
+        />
+      ) : null}
+
+      {openMenu === 'calidad' ? (
+        <HudMenu
+          options={qualityOptions}
+          value={videoQuality}
+          onSelect={chooseQuality}
+          accessibilityLabel="Calidad de vídeo"
         />
       ) : null}
 

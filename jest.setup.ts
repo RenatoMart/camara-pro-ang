@@ -50,6 +50,8 @@ jest.mock('react-native-vision-camera', () => ({
   VisionCamera: {
     cameraPermissionStatus: 'authorized',
     requestCameraPermission: jest.fn(async () => true),
+    microphonePermissionStatus: 'authorized',
+    requestMicrophonePermission: jest.fn(async () => true),
   },
   useCameraDevice: jest.fn(() => ({ id: 'back-0', position: 'back' })),
   usePhotoOutput: jest.fn(() => ({
@@ -58,10 +60,24 @@ jest.mock('react-native-vision-camera', () => ({
   // El asistente de composición no tiene frames que analizar en tests: el
   // output es un objeto opaco y `onFrame` nunca se llama.
   useFrameOutput: jest.fn(() => ({ thread: 'mock-thread' })),
+  useVideoOutput: jest.fn(() => ({
+    createRecorder: jest.fn(async () => ({
+      startRecording: jest.fn(async () => undefined),
+      stopRecording: jest.fn(async () => undefined),
+    })),
+  })),
   HybridFrameConverter: {
     convertFrameToImage: jest.fn(),
   },
-  CommonResolutions: { VGA_16_9: { width: 480, height: 854 } },
+  // Las mismas que `constants/videoQuality.ts` consume de verdad: si sólo se
+  // simula `VGA_16_9`, cualquier test que toque la calidad de vídeo vería
+  // resoluciones `undefined` sin que ningún test lo explique.
+  CommonResolutions: {
+    VGA_16_9: { width: 480, height: 854 },
+    HD_16_9: { width: 720, height: 1280 },
+    FHD_16_9: { width: 1080, height: 1920 },
+    UHD_16_9: { width: 2160, height: 3840 },
+  },
 }));
 
 // Motor de composición: HybridObject de Nitro implementado en C++ propio
@@ -92,7 +108,10 @@ jest.mock('react-native-nitro-image', () => ({
 jest.mock('@shopify/react-native-skia', () => ({
   ImageFormat: { JPEG: 3, PNG: 4 },
   Skia: {
-    Data: { fromURI: jest.fn(async () => ({})) },
+    Data: {
+      fromURI: jest.fn(async () => ({})),
+      fromBase64: jest.fn(() => ({})),
+    },
     Image: { MakeImageFromEncoded: jest.fn(() => null) },
     Surface: { MakeOffscreen: jest.fn(() => null) },
     Paint: jest.fn(() => ({ setAlphaf: jest.fn() })),

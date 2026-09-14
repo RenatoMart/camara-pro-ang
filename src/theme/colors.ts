@@ -138,8 +138,8 @@ export const hudColors: HudColors = {
   level: '#30D97E',
   recording: '#FF453A',
 
-  gridLine: 'rgba(255, 255, 255, 0.30)',
-  gridLineStrong: 'rgba(255, 255, 255, 0.55)',
+  gridLine: 'rgba(255, 255, 255, 0.55)',
+  gridLineStrong: 'rgba(255, 255, 255, 0.85)',
   mask: 'rgba(0, 0, 0, 0.72)',
 
   shutterRing: 'rgba(255, 255, 255, 0.92)',

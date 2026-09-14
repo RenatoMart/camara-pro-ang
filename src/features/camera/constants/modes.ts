@@ -22,12 +22,7 @@ export type Mode = {
 
 export const CAMERA_MODES: ReadonlyArray<Mode> = [
   { kind: 'foto', label: 'Foto', disponible: true },
-  {
-    kind: 'video',
-    label: 'Vídeo',
-    disponible: false,
-    aviso: 'La grabación de vídeo todavía no está disponible.',
-  },
+  { kind: 'video', label: 'Vídeo', disponible: true },
   { kind: 'pro', label: 'Pro', disponible: true },
   {
     kind: 'retrato',

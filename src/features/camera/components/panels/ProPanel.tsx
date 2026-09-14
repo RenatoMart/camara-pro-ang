@@ -1,28 +1,39 @@
 import Slider from '@react-native-community/slider';
 import { useNavigation } from '@react-navigation/native';
 import React, { memo, useCallback } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
 import { useCameraStore } from '@/store/cameraStore';
-import { makeStyles, useTheme } from '@/theme';
+import { HIT_SLOP, makeStyles, useTheme } from '@/theme';
 
 import { GUIDES } from '../../constants/guides';
 import { useGhost } from '../../hooks/useGhost';
 import { HudChip } from '../controls/HudChip';
 import { HudLabeledButton } from '../controls/HudLabeledButton';
+import { Glyph } from '../Glyph';
+
+export type ProPanelProps = {
+  /** Se llama al tocar la manija superior, para ocultar el panel. */
+  onCollapse: () => void;
+};
 
 /**
  * Bandeja de herramientas del modo PRO.
  *
  * Se despliega sobre la tira de modos al elegir «Pro» y reúne lo que
  * distingue a esta cámara: las guías de composición (con su modo automático),
- * el nivel, el disparo al nivelar, el fantasma y el zoom fino.
+ * el nivel, el disparo al nivelar y el fantasma. El zoom no está aquí: es un
+ * control de cualquier cámara, con pellizco sobre el visor y su propio
+ * indicador, y sigue disponible fuera del modo PRO.
  *
- * El formato y el temporizador no están aquí: viven en la barra superior,
- * donde se esperan en cualquier cámara y siguen a mano fuera del modo PRO.
+ * El formato y el temporizador tampoco están aquí: viven en la barra
+ * superior, donde se esperan en cualquier cámara y siguen a mano fuera del
+ * modo PRO.
  */
-export const ProPanel = memo(function ProPanelBase() {
+export const ProPanel = memo(function ProPanelBase({
+  onCollapse,
+}: ProPanelProps) {
   const theme = useTheme();
   const styles = useStyles();
 
@@ -35,8 +46,6 @@ export const ProPanel = memo(function ProPanelBase() {
   const toggleLevel = useCameraStore(state => state.toggleLevel);
   const autoShutter = useCameraStore(state => state.autoShutter);
   const toggleAutoShutter = useCameraStore(state => state.toggleAutoShutter);
-  const zoom = useCameraStore(state => state.zoom);
-  const setZoom = useCameraStore(state => state.setZoom);
   const ghostUri = useCameraStore(state => state.ghostUri);
   const ghostOpacity = useCameraStore(state => state.ghostOpacity);
   const setGhostOpacity = useCameraStore(state => state.setGhostOpacity);
@@ -54,6 +63,21 @@ export const ProPanel = memo(function ProPanelBase() {
 
   return (
     <View style={styles.panel}>
+      {/* Manija de colapso: tocar el visor hace lo mismo, pero conviene un
+          control explícito además del gesto. */}
+      <Pressable
+        onPress={onCollapse}
+        hitSlop={HIT_SLOP}
+        accessibilityRole="button"
+        accessibilityLabel="Ocultar las herramientas PRO"
+        style={({ pressed }) => [
+          styles.collapseHandle,
+          pressed ? styles.pressed : null,
+        ]}
+      >
+        <Glyph name="chevronAbajo" size={16} color={theme.hud.textDim} />
+      </Pressable>
+
       {/* Tira de guías: la fila principal del modo PRO — texto suelto, sin
           caja, igual que la tira de modos de abajo. */}
       <ScrollView
@@ -176,22 +200,6 @@ export const ProPanel = memo(function ProPanelBase() {
         </>
       ) : null}
 
-      <View style={styles.sliderRow}>
-        <Text variant="monoXs" style={styles.sliderLabel}>
-          ZOOM
-        </Text>
-        <Slider
-          style={styles.slider}
-          value={zoom}
-          onValueChange={setZoom}
-          minimumValue={0}
-          maximumValue={1}
-          minimumTrackTintColor={theme.hud.accent}
-          maximumTrackTintColor={theme.hud.chip}
-          thumbTintColor={theme.hud.accent}
-        />
-      </View>
-
       <View style={styles.divider} />
     </View>
   );
@@ -199,9 +207,16 @@ export const ProPanel = memo(function ProPanelBase() {
 
 const useStyles = makeStyles(theme => ({
   panel: {
-    paddingTop: theme.spacing.lg,
+    paddingTop: theme.spacing.xs,
     paddingBottom: theme.spacing.sm,
     gap: theme.spacing.sm,
+  },
+  collapseHandle: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xs,
+  },
+  pressed: {
+    opacity: 0.6,
   },
   guideRow: {
     gap: theme.spacing.lg,

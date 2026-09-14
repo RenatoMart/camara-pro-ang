@@ -22,7 +22,12 @@ export type GlyphName =
   | 'cerrar'
   | 'check'
   | 'chevronAbajo'
-  | 'chevronArriba';
+  | 'chevronArriba'
+  | 'ev'
+  | 's'
+  | 'iso'
+  | 'wb'
+  | 'f';
 
 export type GlyphProps = {
   name: GlyphName;
@@ -86,6 +91,95 @@ export function Glyph({ name, color, size = 20 }: GlyphProps) {
             textAnchor="middle"
           >
             HDR
+          </SvgText>
+        </>
+      ) : null}
+
+      {/* Fila de exposición manual (EV/S/ISO/WB/F): igual que el HDR, una
+          placa con las siglas — es como las rotula cualquier cámara con modo
+          PRO, no hay símbolo universal mejor que la propia sigla. */}
+      {name === 'ev' ? (
+        <>
+          <Rect x={1.5} y={5.5} width={21} height={13} rx={3} {...common} />
+          <SvgText
+            x={12}
+            y={15.2}
+            fill={color}
+            stroke="none"
+            fontSize={9}
+            fontWeight="bold"
+            textAnchor="middle"
+          >
+            EV
+          </SvgText>
+        </>
+      ) : null}
+
+      {name === 's' ? (
+        <>
+          <Rect x={1.5} y={5.5} width={21} height={13} rx={3} {...common} />
+          <SvgText
+            x={12}
+            y={15.2}
+            fill={color}
+            stroke="none"
+            fontSize={10}
+            fontWeight="bold"
+            textAnchor="middle"
+          >
+            S
+          </SvgText>
+        </>
+      ) : null}
+
+      {name === 'iso' ? (
+        <>
+          <Rect x={1.5} y={5.5} width={21} height={13} rx={3} {...common} />
+          <SvgText
+            x={12}
+            y={15.2}
+            fill={color}
+            stroke="none"
+            fontSize={8}
+            fontWeight="bold"
+            textAnchor="middle"
+          >
+            ISO
+          </SvgText>
+        </>
+      ) : null}
+
+      {name === 'wb' ? (
+        <>
+          <Rect x={1.5} y={5.5} width={21} height={13} rx={3} {...common} />
+          <SvgText
+            x={12}
+            y={15.2}
+            fill={color}
+            stroke="none"
+            fontSize={9}
+            fontWeight="bold"
+            textAnchor="middle"
+          >
+            WB
+          </SvgText>
+        </>
+      ) : null}
+
+      {name === 'f' ? (
+        <>
+          <Rect x={1.5} y={5.5} width={21} height={13} rx={3} {...common} />
+          <SvgText
+            x={12}
+            y={15.4}
+            fill={color}
+            stroke="none"
+            fontSize={11}
+            fontStyle="italic"
+            fontWeight="bold"
+            textAnchor="middle"
+          >
+            ƒ
           </SvgText>
         </>
       ) : null}
