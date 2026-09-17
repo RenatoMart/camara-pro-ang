@@ -2,7 +2,6 @@ import type { GuideKind } from '../../constants/guides';
 import {
   CLASS_PRECISION,
   COMPOSITION_CLASSES,
-  isTrainedClass,
   type CompositionClass,
 } from '../constants/compositionClasses';
 import type { ActiveClass, CompositionScores, GuideSuggestion } from '../types';
@@ -47,13 +46,7 @@ const CLASS_TO_GUIDE: Readonly<Record<CompositionClass, GuideKind | null>> = {
 /** Cuántas sugerencias se muestran como mucho a la vez. */
 export const MAX_SUGGESTIONS = 2;
 
-/**
- * Clases cuyo valor supera su umbral.
- *
- * Se descartan las no entrenadas: sus salidas están pegadas a cero, pero un
- * umbral bajo podría dejarlas colarse por ruido y sugeriríamos una guía que
- * el modelo no sabe reconocer.
- */
+/** Clases cuyo valor supera su umbral. */
 export function activeClasses(
   scores: CompositionScores,
   thresholds: Readonly<Record<string, number>>,
@@ -61,9 +54,6 @@ export function activeClasses(
   const active: ActiveClass[] = [];
 
   COMPOSITION_CLASSES.forEach((kind, index) => {
-    if (!isTrainedClass(kind)) {
-      return;
-    }
     const score = scores[index];
     const threshold = thresholds[kind];
     if (score === undefined || threshold === undefined) {

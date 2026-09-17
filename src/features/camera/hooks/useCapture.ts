@@ -4,6 +4,7 @@ import { useCameraStore } from '@/store/cameraStore';
 import { logger } from '@/utils/logger';
 
 import { ASPECTS } from '../constants/guides';
+import type { WhiteBalanceGains } from '../constants/manualControls';
 import { CameraRoll, hapticImpact } from '../services/nativeModules';
 import { cropPhotoToAspect } from '../utils/cropPhoto';
 import { composeGhost } from '../utils/ghostCompose';
@@ -15,9 +16,31 @@ import { composeGhost } from '../utils/ghostCompose';
  * dependa del paquete: `CameraViewport` es quien rellena este contrato.
  */
 export type CameraHandle = {
-  takePictureAsync: (options?: {
-    quality?: number;
-  }) => Promise<{ uri: string } | undefined>;
+  takePictureAsync: () => Promise<{ uri: string } | undefined>;
+  /**
+   * ISO + velocidad de obturación manuales, en un solo golpe (Camera2 los
+   * liga: no hay forma de fijar uno sin fijar también el otro). No hace
+   * nada si la cámara aún no está lista o el sensor no admite manual.
+   */
+  setManualExposure: (iso: number, shutterSeconds: number) => Promise<void>;
+  /**
+   * Balance de blancos manual, dado directamente como ganancias (no
+   * Kelvin: ver `manualControls.ts` sobre por qué un Kelvin absoluto no
+   * sirve sin calibrar contra este sensor en concreto).
+   */
+  setManualWhiteBalance: (gains: WhiteBalanceGains) => Promise<void>;
+  /** Vuelve exposición y balance de blancos a automático. */
+  resetManualControls: () => Promise<void>;
+  /**
+   * ISO + velocidad que el automático está aplicando ahora mismo (o `null`
+   * si aún no hay lectura). Sirve para arrancar el control manual desde el
+   * valor real en vez de uno inventado — por eso es síncrona: hace falta el
+   * valor en el mismo instante en que el usuario toca la regla, no un
+   * instante después.
+   */
+  readLiveExposure: () => { iso: number; shutterSeconds: number } | null;
+  /** Igual que `readLiveExposure`, para el balance de blancos. */
+  readLiveWhiteBalanceGains: () => WhiteBalanceGains | null;
 };
 
 export type Capture = {
@@ -35,6 +58,40 @@ export type Capture = {
    */
   capture: () => Promise<string | null>;
 };
+
+/**
+ * Tope de tiempo para el disparo nativo.
+ *
+ * Red de seguridad, no la defensa principal: si la app pasa a segundo plano
+ * (o la sesión de cámara se interrumpe por cualquier otro motivo) justo
+ * mientras se dispara, la promesa nativa de `capturePhotoToFile` puede
+ * quedarse sin resolver ni rechazar nunca — la cámara que la respaldaba ya
+ * no está. Sin esto, `isCapturing` se quedaba en `true` para siempre: el
+ * disparador mostraba el aro de carga sin parar y no dejaba disparar de
+ * nuevo. Mismo patrón que `composeGhost` (`COMPOSE_TIMEOUT_MS`).
+ */
+const CAPTURE_TIMEOUT_MS = 8_000;
+
+/**
+ * Si el disparo nativo no resuelve a tiempo, se abandona la espera (no se
+ * puede cancelar la promesa nativa en sí) y se trata como una captura
+ * fallida — vale más poder reintentar que quedarse esperando.
+ */
+async function takePictureWithTimeout(
+  camera: CameraHandle,
+): Promise<{ uri: string } | undefined> {
+  return Promise.race([
+    camera.takePictureAsync(),
+    new Promise<undefined>(resolve => {
+      setTimeout(() => {
+        logger.warn(
+          'El disparo tardó demasiado; se libera el disparador para poder reintentar',
+        );
+        resolve(undefined);
+      }, CAPTURE_TIMEOUT_MS);
+    }),
+  ]);
+}
 
 /**
  * Guarda la foto en la galería del sistema.
@@ -97,16 +154,34 @@ export function useCapture(): Capture {
   );
 
   const capture = useCallback(async (): Promise<string | null> => {
+    if (capturingRef.current) {
+      // Ya hay un disparo en marcha: se ignora el toque de más en silencio,
+      // es lo normal al tocar rápido dos veces.
+      return null;
+    }
     const camera = cameraRef.current;
-    if (!camera || capturingRef.current) {
+    if (!camera) {
+      // La cámara se desmonta mientras se reconecta tras una interrupción
+      // (segundo plano, llamada entrante…) — sin aviso, un toque en ese
+      // instante no hacía nada y se sentía igual que un cuelgue.
+      logger.warn('No se pudo disparar: la cámara todavía no está lista');
+      hapticImpact('medium');
       return null;
     }
 
     capturingRef.current = true;
     setIsCapturing(true);
+    // Cuánto tarda cada paso hasta que el disparador vuelve a estar libre
+    // (`isCapturing` a `false`), que es lo que de verdad nota el usuario —
+    // no incluye guardar en galería ni fundir el fantasma, que ya corren
+    // en segundo plano. Sólo se ve con `npm run android` (`logger` se apaga
+    // en release), es para medir en el propio teléfono, no telemetría.
+    const startedAt = Date.now();
     try {
-      const photo = await camera.takePictureAsync({ quality: 0.9 });
+      const photo = await takePictureWithTimeout(camera);
+      const capturedAt = Date.now();
       if (!photo?.uri) {
+        hapticImpact('medium');
         return null;
       }
 
@@ -119,23 +194,37 @@ export function useCapture(): Capture {
       const ratio =
         ASPECTS.find(option => option.kind === aspect)?.ratio ?? null;
       const croppedUri = await cropPhotoToAspect(photo.uri, ratio);
+      const croppedAt = Date.now();
+      logger.debug('Tiempos de captura (ms)', {
+        sensorYCodificacion: capturedAt - startedAt,
+        recorte: croppedAt - capturedAt,
+        totalHastaLiberarDisparador: croppedAt - startedAt,
+      });
 
       // La miniatura se actualiza ya, tanto si hay fusión pendiente como si
       // no: es lo que hace sentir el disparo instantáneo.
       setLastPhoto(croppedUri);
 
+      // Guardar en galería va en segundo plano, igual que fundir el
+      // fantasma: al usuario ya le mostramos la miniatura, así que no tiene
+      // sentido tenerlo esperando a que el sistema termine de escribir el
+      // archivo en la galería para poder disparar la siguiente foto.
       if (ghostBurn && ghostUri !== null) {
         // Sólo se guarda una foto por disparo: la fundida si sale a tiempo,
         // o esta misma si la fusión falla o tarda — nunca las dos, que
         // duplicaría cada toma con fantasma en la galería.
         void finishWithGhost(croppedUri, ghostUri, ghostOpacity);
       } else {
-        await saveToGallery(croppedUri);
+        void saveToGallery(croppedUri);
       }
 
       return croppedUri;
     } catch (error) {
       logger.error('La captura falló', error);
+      // El toque de todas formas hizo algo, aunque haya salido mal — sin
+      // esto no había ninguna señal, y un fallo silencioso se siente igual
+      // que un cuelgue.
+      hapticImpact('medium');
       return null;
     } finally {
       capturingRef.current = false;

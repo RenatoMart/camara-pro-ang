@@ -15,18 +15,23 @@ La cámara abre directo al visor, sin login. El modo normal es mínimo
 (disparador, flash, voltear, galería); el chip **PRO** despliega las
 herramientas avanzadas:
 
-| Herramienta                  | Qué hace                                                                                       |
-| ---------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Guías de composición**     | 3×3 (tercios), Phi (proporción áurea), 4×4, espiral de Fibonacci, triángulos dorados, simetría |
-| **Máscaras de formato**      | 1:1, 4:5, 9:16, 16:9 y 2.39:1 (cine): sombrean lo que queda fuera sin ocultar la escena        |
-| **Nivel giroscópico 2 ejes** | Horizonte artificial con acelerómetro; se pone verde al nivelar (con histéresis anti-parpadeo) |
-| **Disparo automático**       | Dispara solo cuando mantienes el horizonte nivelado ~0.7 s                                     |
-| **Modo fantasma**            | Superpone una foto anterior semitransparente; opcionalmente la funde en la captura             |
-| **Temporizador y zoom**      | 3 s / 10 s con cuenta atrás, zoom continuo                                                     |
+| Herramienta                  | Qué hace                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| **Guías de composición**     | 3×3 (tercios), Phi (proporción áurea), 4×4, espiral de Fibonacci, triángulos dorados, simetría   |
+| **Máscaras de formato**      | 1:1, 4:5, 9:16, 16:9 y 2.39:1 (cine): sombrean lo que queda fuera sin ocultar la escena          |
+| **Nivel giroscópico 2 ejes** | Horizonte artificial con acelerómetro; se pone verde al nivelar (con histéresis anti-parpadeo)   |
+| **Disparo automático**       | Dispara solo cuando mantienes el horizonte nivelado ~0.7 s                                       |
+| **Modo fantasma**            | Superpone una foto anterior semitransparente; opcionalmente la funde en la captura               |
+| **Modo vídeo**               | Graba con el mismo visor y guías; cambia de foto a vídeo sin salir de la pantalla                |
+| **Controles manuales PRO**   | ISO, velocidad de obturación, balance de blancos y EV a mano, con vuelta a automático            |
+| **Tocar para enfocar**       | Toca el visor para enfocar y exponer ahí (si el sensor lo admite); marco animado de confirmación |
+| **Temporizador y zoom**      | 3 s / 10 s con cuenta atrás, zoom continuo                                                       |
 
 Además: galería en cuadrícula de 3 columnas (últimas fotos del carrete),
-visor de foto a pantalla completa con "Usar como fantasma", y guardado
-automático en la galería del sistema.
+visor de foto a pantalla completa con "Usar como fantasma", guardado
+automático en la galería del sistema y, en Ajustes → **Guía**, un mini
+tutorial animado de cada línea guía (toca una tarjeta para ver el ejemplo en
+movimiento).
 
 ### Las dos caras del modo fantasma
 
@@ -110,9 +115,32 @@ VisionCamera → worklet → C++ por JSI. Lo que falta se apoya en ella:
 ## Puesta en marcha
 
 ```bash
-npm install          # instala dependencias y prepara los git hooks
+npm install          # instala dependencias, aplica los patches y prepara los git hooks
 cp .env.example .env # variables de entorno (ver sección Entornos)
 ```
+
+`npm install` corre `patch-package` solo (hook `postinstall`): aplica los
+`.patch` de `patches/` sobre `node_modules` sin tocar nada a mano. Ahí vive
+`react-native-vision-camera+5.2.2.patch`, con retoques de Kotlin que la
+librería no expone (lectura en vivo de ISO/velocidad/balance de blancos del
+3A automático vía `Camera2Interop`, entre otros). Si hace falta tocar ese
+código nativo de nuevo:
+
+```bash
+# 1. Edita directo en node_modules/react-native-vision-camera/android/...
+# 2. Antes de regenerar el patch, borra las cachés de compilación nativa:
+#    si se incluyen en el diff lo inflan (a veces varios GB) y pueden agotar
+#    el tmpfs de /tmp.
+rm -rf node_modules/react-native-vision-camera/android/.gradle \
+       node_modules/react-native-vision-camera/android/.cxx \
+       node_modules/react-native-vision-camera/android/build
+npx patch-package react-native-vision-camera \
+  --exclude '(android/\.gradle/|android/build/|android/\.cxx/)'
+```
+
+`patches/` **se commitea siempre**: sin eso, un `npm install` en otra máquina
+deja el Kotlin de la librería sin los retoques y esas funciones dejan de
+compilar o vuelven a su comportamiento por defecto.
 
 El proyecto se compila y se depura siempre como **build nativa**, por cable
 USB. No pasa por Expo ni por Expo Go: se quitaron a propósito porque limitan

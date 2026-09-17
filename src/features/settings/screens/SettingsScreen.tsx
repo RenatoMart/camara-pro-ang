@@ -1,3 +1,4 @@
+import { useIsFocused } from '@react-navigation/native';
 import React from 'react';
 import { View } from 'react-native';
 
@@ -8,6 +9,8 @@ import { Text } from '@/components/ui/Text';
 import { env } from '@/config/env';
 import { useSettingsStore, type ThemePreference } from '@/store/settingsStore';
 import { makeStyles } from '@/theme';
+
+import { GuideTutorial } from '../components/GuideTutorial';
 
 const THEME_OPTIONS: ReadonlyArray<{
   value: ThemePreference;
@@ -20,6 +23,7 @@ const THEME_OPTIONS: ReadonlyArray<{
 
 export function SettingsScreen() {
   const styles = useStyles();
+  const isFocused = useIsFocused();
 
   const themePreference = useSettingsStore(state => state.themePreference);
   const setThemePreference = useSettingsStore(
@@ -50,6 +54,17 @@ export function SettingsScreen() {
             />
           ))}
         </View>
+      </Card>
+
+      <Card>
+        <Text variant="overline" color="textSecondary">
+          Guía
+        </Text>
+        <Text variant="caption" color="textSecondary">
+          Las líneas guía del modo PRO ayudan a encuadrar antes de disparar.
+          Esto es lo que dibuja cada una y para qué escena sirve.
+        </Text>
+        <GuideTutorial active={isFocused} />
       </Card>
 
       <Card>

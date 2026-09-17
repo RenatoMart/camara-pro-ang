@@ -7,6 +7,15 @@ import { HIT_SLOP, makeStyles, useTheme } from '@/theme';
 
 import { CAMERA_MODES, type CameraMode } from '../../constants/modes';
 
+export type ModeSelectorProps = {
+  /**
+   * Cambia el aviso de un modo por uno más preciso que el genérico de
+   * `CAMERA_MODES` — hoy sólo lo usa «retrato», cuyo aviso depende de si
+   * este sensor en concreto reporta la extensión de fábrica o no.
+   */
+  avisoOverrides?: Partial<Record<CameraMode, string>>;
+};
+
 /**
  * Tira de modos de disparo.
  *
@@ -14,12 +23,15 @@ import { CAMERA_MODES, type CameraMode } from '../../constants/modes';
  * nombres en fila, el activo en amarillo con un punto debajo, y el resto
  * apagados. Desliza horizontalmente cuando no caben todos.
  */
-export const ModeSelector = memo(function ModeSelectorBase() {
+export const ModeSelector = memo(function ModeSelectorBase({
+  avisoOverrides,
+}: ModeSelectorProps) {
   const styles = useStyles();
   const mode = useCameraStore(state => state.mode);
   const setMode = useCameraStore(state => state.setMode);
 
   const activeMode = CAMERA_MODES.find(option => option.kind === mode);
+  const activeAviso = avisoOverrides?.[mode] ?? activeMode?.aviso;
 
   return (
     <View>
@@ -40,9 +52,9 @@ export const ModeSelector = memo(function ModeSelectorBase() {
       </ScrollView>
 
       {/* Los modos aún sin implementar se pueden elegir, pero lo dicen. */}
-      {activeMode !== undefined && activeMode.aviso !== undefined ? (
+      {activeAviso !== undefined ? (
         <Text variant="monoXs" style={styles.aviso} align="center">
-          {activeMode.aviso}
+          {activeAviso}
         </Text>
       ) : null}
     </View>

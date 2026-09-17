@@ -19,7 +19,7 @@ function scoresWith(indices: number[], value = 0.99): number[] {
 
 describe('activeClasses', () => {
   it('activa sólo lo que supera su propio umbral', () => {
-    // `rule_of_thirds` tiene umbral 0.45 y `curved` 0.75: el mismo 0.5
+    // `rule_of_thirds` tiene umbral 0.5 y `curved` 0.75: el mismo 0.5
     // enciende una y no la otra.
     const scores = scoresWith([], 0);
     scores[0] = 0.5;
@@ -40,12 +40,16 @@ describe('activeClasses', () => {
     ]);
   });
 
-  it('ignora las clases sin entrenar aunque vengan al máximo', () => {
-    // Índices 9-13: su dataset nunca se descargó y valen siempre ~0. Si por
-    // ruido subieran, no deben proponerse.
+  it('activa también las 5 clases de AVA (índices 9-13), ya entrenadas', () => {
     const active = activeClasses(scoresWith([9, 10, 11, 12, 13]), thresholds);
 
-    expect(active).toEqual([]);
+    expect(active.map(a => a.kind).sort()).toEqual([
+      'color_blocking',
+      'negative_space',
+      'shallow_dof',
+      'tonal_contrast',
+      'vanishing_point',
+    ]);
   });
 });
 
@@ -59,8 +63,8 @@ describe('suggestGuides', () => {
   });
 
   it('pondera por la fiabilidad de cada clase, no sólo por la probabilidad', () => {
-    // `rule_of_thirds` llega más alta, pero acierta el 57,7% de las veces
-    // frente al 91% de `pattern`: debe ganar `pattern`.
+    // `rule_of_thirds` llega más alta, pero acierta sólo el 32,9% de las
+    // veces frente al 98% de `pattern`: debe ganar `pattern`.
     const suggestions = suggestGuides([
       { kind: 'rule_of_thirds', score: 0.95 },
       { kind: 'pattern', score: 0.8 },

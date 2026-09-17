@@ -30,10 +30,8 @@ export const CAMERA_MODES: ReadonlyArray<Mode> = [
     disponible: false,
     aviso: 'El modo retrato todavía no está disponible.',
   },
-  {
-    kind: 'ultraHd',
-    label: 'Ultra HD',
-    disponible: false,
-    aviso: 'La captura en Ultra HD todavía no está disponible.',
-  },
+  // Sin aviso: pide la foto a la resolución máxima real del sensor
+  // (`device.getSupportedResolutions('photo')`), en vez del preset genérico
+  // que usa el resto de modos — ver `photoResolution` en `CameraScreen.tsx`.
+  { kind: 'ultraHd', label: 'Ultra HD', disponible: true },
 ];

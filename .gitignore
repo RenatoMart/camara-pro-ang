@@ -83,15 +83,16 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Asistentes de IA (skills, agentes, configuración local).
-# No forman parte de la plantilla: quítalos de aquí si quieres compartirlos.
+# Asistentes de IA: configuración y skills locales, no forman parte del
+# proyecto (quítalos de aquí si quieres compartirlos). CLAUDE.md se queda
+# fuera de esta lista a propósito: ya no es config de plantilla, son las
+# reglas no negociables de esta app y hace falta que viajen con el repo.
 .claude/
 .agents/
 .cursor/
 .windsurf/
 .aider*
 AGENTS.md
-CLAUDE.md
 GEMINI.md
 skills-lock.json
 

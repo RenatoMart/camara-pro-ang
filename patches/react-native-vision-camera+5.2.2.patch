@@ -1,0 +1,599 @@
+diff --git a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/HybridCameraController.kt b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/HybridCameraController.kt
+index 337601a..f480fda 100644
+--- a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/HybridCameraController.kt
++++ b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/HybridCameraController.kt
+@@ -2,6 +2,15 @@ package com.margelo.nitro.camera.hybrids
+ 
+ import android.animation.Animator
+ import android.animation.ValueAnimator
++import android.hardware.camera2.CameraCharacteristics
++import android.hardware.camera2.CameraMetadata
++import android.hardware.camera2.CaptureRequest
++import android.hardware.camera2.params.RggbChannelVector
++import androidx.annotation.OptIn
++import androidx.camera.camera2.interop.Camera2CameraControl
++import androidx.camera.camera2.interop.Camera2CameraInfo
++import androidx.camera.camera2.interop.CaptureRequestOptions
++import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+ import androidx.camera.core.Camera
+ import androidx.camera.core.CameraState
+ import androidx.camera.core.FocusMeteringAction
+@@ -27,12 +36,15 @@ import com.margelo.nitro.camera.WhiteBalanceTemperatureAndTint
+ import com.margelo.nitro.camera.extensions.await
+ import com.margelo.nitro.camera.extensions.converters.fromTorchState
+ import com.margelo.nitro.camera.extensions.converters.toMeteringMode
++import com.margelo.nitro.camera.extensions.fromSafe
+ import com.margelo.nitro.camera.hybrids.inputs.HybridCameraDevice
+ import com.margelo.nitro.camera.hybrids.metering.HybridMeteringPoint
+ import com.margelo.nitro.core.Promise
+ import com.margelo.nitro.core.resolve
+ import com.margelo.nitro.core.resolved
+ import java.util.concurrent.TimeUnit
++import kotlin.math.roundToInt
++import kotlin.math.roundToLong
+ 
+ class HybridCameraController(
+   val camera: Camera,
+@@ -42,6 +54,28 @@ class HybridCameraController(
+     get() = camera.cameraInfo.cameraState.value
+   private var zoomAnimator: ValueAnimator? = null
+ 
++  // PATCH CamaraProAng: base para ISO/velocidad/WB manuales — ver el resto
++  // de marcas "PATCH CamaraProAng" en este archivo y en HybridCameraDevice.kt.
++  // CameraX no soporta esto por su API pública; `Camera2CameraControl` es el
++  // escape hatch documentado hacia Camera2 (`setCaptureRequestOptions`).
++  @OptIn(ExperimentalCamera2Interop::class)
++  private val camera2Info: Camera2CameraInfo? by lazy { Camera2CameraInfo.fromSafe(camera.cameraInfo) }
++
++  @OptIn(ExperimentalCamera2Interop::class)
++  private val camera2Control: Camera2CameraControl? by lazy {
++    try {
++      Camera2CameraControl.from(camera.cameraControl)
++    } catch (error: Throwable) {
++      null
++    }
++  }
++
++  // CameraX no expone si el AE/AWB está en modo manual: lo llevamos nosotros.
++  // `resetFocus()` los limpia también, tal como documenta la interfaz
++  // ("para volver a automático, usa resetFocus()").
++  private var manualExposure: Pair<Double, Double>? = null // (duration en segundos, iso)
++  private var manualWhiteBalance: WhiteBalanceGains? = null
++
+   override val isConnected: Boolean
+     get() = cameraState?.type == CameraState.Type.OPEN
+ 
+@@ -89,13 +123,16 @@ class HybridCameraController(
+   override val isSmoothAutoFocusEnabled: Boolean
+     get() = false
+ 
+-  // TODO: CameraX only supports continuous AE/AF/AWB
++  // TODO: CameraX only supports continuous AF
+   override val focusMode: FocusMode
+     get() = FocusMode.CONTINUOUS_AUTO_FOCUS
++
++  // PATCH CamaraProAng: antes fijo en CONTINUOUS_AUTO_*; ahora refleja si hay
++  // un `setExposureLocked`/`setWhiteBalanceLocked` manual activo.
+   override val exposureMode: ExposureMode
+-    get() = ExposureMode.CONTINUOUS_AUTO_EXPOSURE
++    get() = if (manualExposure != null) ExposureMode.CUSTOM else ExposureMode.CONTINUOUS_AUTO_EXPOSURE
+   override val whiteBalanceMode: WhiteBalanceMode
+-    get() = WhiteBalanceMode.CONTINUOUS_AUTO_WHITE_BALANCE
++    get() = if (manualWhiteBalance != null) WhiteBalanceMode.LOCKED else WhiteBalanceMode.CONTINUOUS_AUTO_WHITE_BALANCE
+ 
+   override fun configure(config: CameraControllerConfiguration): Promise<Unit> {
+     return Promise.async {
+@@ -182,14 +219,6 @@ class HybridCameraController(
+       }.toTypedArray()
+   }
+ 
+-  override fun resetFocus(): Promise<Unit> {
+-    return Promise.async {
+-      camera.cameraControl
+-        .cancelFocusAndMetering()
+-        .await()
+-    }
+-  }
+-
+   override fun addSubjectAreaChangedListener(onSubjectAreaChanged: (() -> Unit)): ListenerSubscription {
+     // TODO: CameraX does not yet support subject area changed listeners.
+     //       Feature Request: https://issuetracker.google.com/issues/505643406
+@@ -300,59 +329,260 @@ class HybridCameraController(
+     )
+   }
+ 
+-  // TODO: Once CameraX implements locking Exposure to custom duration/ISO, implement this:
++  // PATCH CamaraProAng: rangos reales del sensor vía Camera2, en vez de 0
++  // fijo. `SENSOR_INFO_EXPOSURE_TIME_RANGE` viene en nanosegundos (Camera2);
++  // la interfaz pide segundos.
++  @OptIn(ExperimentalCamera2Interop::class)
+   override val minExposureDuration: Double
+-    get() = 0.0
++    get() = exposureDurationRangeNs?.lower?.toDouble()?.div(NANOS_PER_SECOND) ?: 0.0
++
++  @OptIn(ExperimentalCamera2Interop::class)
+   override val maxExposureDuration: Double
+-    get() = 0.0
++    get() = exposureDurationRangeNs?.upper?.toDouble()?.div(NANOS_PER_SECOND) ?: 0.0
++
++  @OptIn(ExperimentalCamera2Interop::class)
+   override val minISO: Double
+-    get() = 0.0
++    get() = isoRange?.lower?.toDouble() ?: 0.0
++
++  @OptIn(ExperimentalCamera2Interop::class)
+   override val maxISO: Double
+-    get() = 0.0
++    get() = isoRange?.upper?.toDouble() ?: 0.0
++
++  // En manual, el valor fijado a mano; en automático, el que de verdad está
++  // aplicando el 3A ahora mismo — ver `LiveCameraCaptureState`. `0` sólo si
++  // ni siquiera eso hay todavía (sesión recién abierta, sin resultados).
+   override val iso: Double
+-    get() = 0.0
++    get() = manualExposure?.second ?: (LiveCameraCaptureState.isoValue?.toDouble() ?: 0.0)
+   override val exposureDuration: Double
+-    get() = 0.0
++    get() =
++      manualExposure?.first
++        ?: (LiveCameraCaptureState.exposureDurationNs?.toDouble()?.div(NANOS_PER_SECOND) ?: 0.0)
++
++  @OptIn(ExperimentalCamera2Interop::class)
++  private val isoRange: android.util.Range<Int>?
++    get() = camera2Info?.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+ 
++  @OptIn(ExperimentalCamera2Interop::class)
++  private val exposureDurationRangeNs: android.util.Range<Long>?
++    get() = camera2Info?.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
++
++  @OptIn(ExperimentalCamera2Interop::class)
+   override fun setExposureLocked(
+     duration: Double,
+     iso: Double,
+   ): Promise<Unit> {
+-    throw Error(
+-      "Locking Exposure to manual duration/ISO values is not yet supported on Android! " +
+-        "You can use Exposure Bias (`setExposureBias(...)`) or AE metering locks (`focusTo(point, { modes: ['AE'], adaptiveness: 'locked' })`) instead.",
+-    )
++    return Promise.async {
++      val control =
++        camera2Control
++          ?: throw Error("Manual exposure is not supported on this device (not backed by Camera2)!")
++      val isoRange = isoRange ?: throw Error("This device does not report a manual ISO range!")
++      val durationRange =
++        exposureDurationRangeNs ?: throw Error("This device does not report a manual exposure duration range!")
++
++      val isoInt = iso.roundToInt()
++      val durationNs = (duration * NANOS_PER_SECOND).roundToLong()
++      if (isoInt < isoRange.lower || isoInt > isoRange.upper) {
++        throw Error(
++          "`iso` is out of range! Expected ${isoRange.lower}...${isoRange.upper}, received $isoInt.",
++        )
++      }
++      if (durationNs < durationRange.lower || durationNs > durationRange.upper) {
++        throw Error(
++          "`duration` is out of range! Expected ${durationRange.lower / NANOS_PER_SECOND}" +
++            "...${durationRange.upper / NANOS_PER_SECOND} seconds, received $duration.",
++        )
++      }
++
++      val options =
++        CaptureRequestOptions.Builder()
++          .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
++          .setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, isoInt)
++          .setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, durationNs)
++          .build()
++      // `add`, no `set`: éste segundo *añade* a lo que ya hubiera puesto
++      // `setWhiteBalanceLocked` en vez de reemplazarlo entero — Camera2 sólo
++      // ve un bundle de opciones por controlador, y `set` lo sustituye
++      // completo.
++      control.addCaptureRequestOptions(options).await()
++      manualExposure = duration to iso
++    }
+   }
+ 
+   override fun lockCurrentExposure(): Promise<Unit> {
++    // Requeriría leer el ISO/velocidad que el AE automático está usando en
++    // este instante (un `CaptureCallback` de Camera2 aparte, que CameraX no
++    // expone) para fijarlos ahí. No implementado: usa `setExposureLocked`
++    // con valores concretos en su lugar.
+     throw Error(
+-      "Locking Exposure to manual duration/ISO values is not yet supported on Android! " +
+-        "You can use Exposure Bias (`setExposureBias(...)`) or AE metering locks (`focusTo(point, { modes: ['AE'], adaptiveness: 'locked' })`) instead.",
++      "Locking the *current* auto-exposure values is not supported on Android! " +
++        "Use `setExposureLocked(duration, iso)` with explicit values instead.",
+     )
+   }
+ 
+-  // TODO: Once CameraX implements locking AWB to custom White Balance Gains, implement this:
++  // PATCH CamaraProAng: en manual, las ganancias fijadas a mano; en
++  // automático, las que de verdad está aplicando el AWB ahora mismo (ver
++  // `LiveCameraCaptureState`) — antes era `{0,0,0}` fijo.
+   override val whiteBalanceGains: WhiteBalanceGains
+-    get() = WhiteBalanceGains(0.0, 0.0, 0.0)
++    get() {
++      manualWhiteBalance?.let { return it }
++      val live =
++        LiveCameraCaptureState.whiteBalanceGains
++          ?: return WhiteBalanceGains(redGain = 0.0, blueGain = 0.0, greenGain = 0.0)
++      return WhiteBalanceGains(
++        redGain = live.red.toDouble(),
++        blueGain = live.blue.toDouble(),
++        // Camera2 permite verde par/impar distintos; el control manual de la
++        // app sólo maneja uno, así que se promedian para la lectura.
++        greenGain = ((live.greenEven + live.greenOdd) / 2f).toDouble(),
++      )
++    }
+ 
+-  override fun convertWhiteBalanceTemperatureAndTintValues(whiteBalanceTemperatureAndTint: WhiteBalanceTemperatureAndTint): WhiteBalanceGains {
+-    throw Error(
+-      "Locking White Balance Gains is not yet supported on Android! " +
+-        "You can use AWB metering locks (`focusTo(point, { modes: ['AWB'], adaptiveness: 'locked' })`) instead.",
++  /**
++   * Aproximación de cuerpo negro (Kelvin → RGB) para convertir una
++   * temperatura de color "amigable" en las ganancias que hacen falta para
++   * neutralizarla, normalizadas contra D65 (~6500K, blanco de referencia).
++   * No está calibrada contra la matriz de color de este sensor en concreto
++   * (`SENSOR_COLOR_TRANSFORM*`/`SENSOR_FORWARD_MATRIX*` de Camera2 sí lo
++   * están, pero requieren un pipeline colorimétrico completo) — es una
++   * aproximación perceptual, suficiente para un control manual a mano, no
++   * una medición del dispositivo.
++   */
++  @OptIn(ExperimentalCamera2Interop::class)
++  override fun convertWhiteBalanceTemperatureAndTintValues(
++    whiteBalanceTemperatureAndTint: WhiteBalanceTemperatureAndTint,
++  ): WhiteBalanceGains {
++    val maxGain = device.maxWhiteBalanceGain
++    if (maxGain <= 0.0) {
++      throw Error("This device does not support manual white balance!")
++    }
++
++    val (redAtTemp, greenAtTemp, blueAtTemp) = blackbodyRgb(whiteBalanceTemperatureAndTint.temperature)
++    val (redAtD65, greenAtD65, blueAtD65) = blackbodyRgb(D65_KELVIN)
++
++    // Ganancia = a qué canal hay que multiplicar para que la luz de esta
++    // temperatura "se vea" como D65. Se normaliza por verde, que es el canal
++    // que Camera2 no permite desbalancear entre sí (mismo gain en G_even y
++    // G_odd en `RggbChannelVector`).
++    val redGain = (redAtD65 / redAtTemp) / (greenAtD65 / greenAtTemp)
++    val blueGain = (blueAtD65 / blueAtTemp) / (greenAtD65 / greenAtTemp)
++    // El tinte verde/magenta se aplica como un pequeño empuje sobre el verde
++    // mismo: positivo (magenta) lo reduce, negativo (verde) lo sube.
++    val greenGain = 1.0 - (whiteBalanceTemperatureAndTint.tint / 200.0)
++
++    return WhiteBalanceGains(
++      redGain = redGain.coerceIn(1.0, maxGain),
++      blueGain = blueGain.coerceIn(1.0, maxGain),
++      greenGain = greenGain.coerceIn(1.0, maxGain),
+     )
+   }
+ 
++  @OptIn(ExperimentalCamera2Interop::class)
+   override fun setWhiteBalanceLocked(whiteBalanceGains: WhiteBalanceGains): Promise<Unit> {
+-    throw Error(
+-      "Locking White Balance Gains is not yet supported on Android! " +
+-        "You can use AWB metering locks (`focusTo(point, { modes: ['AWB'], adaptiveness: 'locked' })`) instead.",
+-    )
++    return Promise.async {
++      val control =
++        camera2Control
++          ?: throw Error("Manual white balance is not supported on this device (not backed by Camera2)!")
++      val maxGain = device.maxWhiteBalanceGain
++      if (maxGain <= 0.0) {
++        throw Error("Manual white balance is not supported on this device!")
++      }
++      val channels = listOf(whiteBalanceGains.redGain, whiteBalanceGains.greenGain, whiteBalanceGains.blueGain)
++      val outOfRange = channels.any { it < 1.0 || it > maxGain }
++      if (outOfRange) {
++        throw Error(
++          "White balance gains must be within 1.0...$maxGain! Received $whiteBalanceGains.",
++        )
++      }
++
++      val vector =
++        RggbChannelVector(
++          whiteBalanceGains.redGain.toFloat(),
++          whiteBalanceGains.greenGain.toFloat(),
++          whiteBalanceGains.greenGain.toFloat(),
++          whiteBalanceGains.blueGain.toFloat(),
++        )
++      val options =
++        CaptureRequestOptions.Builder()
++          .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
++          .setCaptureRequestOption(
++            CaptureRequest.COLOR_CORRECTION_MODE,
++            CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
++          )
++          .setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_GAINS, vector)
++          .build()
++      // Ver el comentario de `setExposureLocked`: `add`, no `set`.
++      control.addCaptureRequestOptions(options).await()
++      manualWhiteBalance = whiteBalanceGains
++    }
+   }
+ 
+   override fun lockCurrentWhiteBalance(): Promise<Unit> {
++    // Mismo motivo que `lockCurrentExposure()`: no hay lectura en vivo de las
++    // ganancias que el AWB automático está aplicando ahora mismo.
+     throw Error(
+-      "Locking White Balance Gains is not yet supported on Android! " +
+-        "You can use AWB metering locks (`focusTo(point, { modes: ['AWB'], adaptiveness: 'locked' })`) instead.",
++      "Locking the *current* auto-white-balance values is not supported on Android! " +
++        "Use `setWhiteBalanceLocked(gains)` with explicit values (see " +
++        "`convertWhiteBalanceTemperatureAndTintValues`) instead.",
+     )
+   }
++
++  @OptIn(ExperimentalCamera2Interop::class)
++  override fun resetFocus(): Promise<Unit> {
++    return Promise.async {
++      camera.cameraControl
++        .cancelFocusAndMetering()
++        .await()
++
++      // PATCH CamaraProAng: `resetFocus()` también deshace ISO/velocidad/WB
++      // manuales, tal como documenta la interfaz ("para volver a automático,
++      // usa resetFocus()"). `clearCaptureRequestOptions()` no toma claves:
++      // borra todas las opciones manuales puestas por `setCaptureRequestOptions`.
++      val control = camera2Control
++      if (control != null && (manualExposure != null || manualWhiteBalance != null)) {
++        control.clearCaptureRequestOptions().await()
++        manualExposure = null
++        manualWhiteBalance = null
++      }
++    }
++  }
++
++  companion object {
++    private const val NANOS_PER_SECOND = 1_000_000_000.0
++
++    /** Blanco de referencia D65 (luz de día estándar), usado para normalizar. */
++    private const val D65_KELVIN = 6504.0
++
++    /**
++     * Aproximación estándar de cuerpo negro Kelvin → RGB (0.0-1.0 por canal),
++     * variante del algoritmo de Tanner Helland. Válida en el rango
++     * 1000K-40000K, que cubre de sobra cualquier temperatura de cámara real.
++     */
++    private fun blackbodyRgb(kelvin: Double): Triple<Double, Double, Double> {
++      val temp = kelvin.coerceIn(1000.0, 40000.0) / 100.0
++
++      val red =
++        if (temp <= 66.0) {
++          1.0
++        } else {
++          (329.698727446 * Math.pow(temp - 60.0, -0.1332047592) / 255.0).coerceIn(0.0, 1.0)
++        }
++
++      val green =
++        if (temp <= 66.0) {
++          (99.4708025861 * Math.log(temp) - 161.1195681661) / 255.0
++        } else {
++          (288.1221695283 * Math.pow(temp - 60.0, -0.0755148492) / 255.0)
++        }.coerceIn(0.0, 1.0)
++
++      val blue =
++        when {
++          temp >= 66.0 -> 1.0
++          temp <= 19.0 -> 0.0
++          else -> (138.5177312231 * Math.log(temp - 10.0) - 305.0447927307) / 255.0
++        }.coerceIn(0.0, 1.0)
++
++      // Nunca 0: son divisores en `convertWhiteBalanceTemperatureAndTintValues`.
++      return Triple(red.coerceAtLeast(0.001), green.coerceAtLeast(0.001), blue.coerceAtLeast(0.001))
++    }
++  }
+ }
+diff --git a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/LiveCameraCaptureState.kt b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/LiveCameraCaptureState.kt
+new file mode 100644
+index 0000000..b34b81b
+--- /dev/null
++++ b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/LiveCameraCaptureState.kt
+@@ -0,0 +1,55 @@
++package com.margelo.nitro.camera.hybrids
++
++import android.hardware.camera2.CaptureResult
++import android.hardware.camera2.TotalCaptureResult
++import android.hardware.camera2.params.RggbChannelVector
++
++/**
++ * PATCH CamaraProAng: último resultado de captura real — el ISO/velocidad/WB
++ * que el 3A automático está aplicando de verdad ahora mismo, no un rango
++ * estático de `CameraCharacteristics`.
++ *
++ * Sirve para arrancar los controles manuales (`HybridCameraController`)
++ * desde el valor que ya se está viendo en el visor en vez de uno inventado:
++ * sin esto, pasar de automático a manual daba un salto brusco de exposición
++ * o de color, porque el punto de partida no tenía nada que ver con lo que
++ * el usuario estaba viendo un instante antes.
++ *
++ * Lo alimenta `HybridPreviewOutput.createUseCase`, enganchando
++ * `Camera2Interop.Extender.setSessionCaptureCallback` al `Preview` — es la
++ * única forma de leer esto en CameraX: no hay API pública para resultados de
++ * captura en vivo, y el enganche tiene que ir al construir el `UseCase`, no
++ * se puede añadir después sobre uno ya vinculado (por eso vive en el
++ * `Preview`, que siempre está presente mientras hay visor, y no en
++ * `HybridCameraController`, que sólo tiene la `Camera` ya vinculada).
++ *
++ * Es un único estado global y no uno por cámara: esta app sólo mantiene una
++ * sesión de cámara activa a la vez, así que no hace falta más — cambiar de
++ * cámara (frontal/trasera) reconstruye el `Preview` y `reset()` limpia lo
++ * anterior antes de que lleguen resultados nuevos.
++ */
++object LiveCameraCaptureState {
++  @Volatile
++  var isoValue: Int? = null
++    private set
++
++  @Volatile
++  var exposureDurationNs: Long? = null
++    private set
++
++  @Volatile
++  var whiteBalanceGains: RggbChannelVector? = null
++    private set
++
++  fun reset() {
++    isoValue = null
++    exposureDurationNs = null
++    whiteBalanceGains = null
++  }
++
++  fun update(result: TotalCaptureResult) {
++    result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { isoValue = it }
++    result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { exposureDurationNs = it }
++    result.get(CaptureResult.COLOR_CORRECTION_GAINS)?.let { whiteBalanceGains = it }
++  }
++}
+diff --git a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/inputs/HybridCameraDevice.kt b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/inputs/HybridCameraDevice.kt
+index 4a1ea67..1b6472a 100644
+--- a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/inputs/HybridCameraDevice.kt
++++ b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/inputs/HybridCameraDevice.kt
+@@ -2,6 +2,7 @@ package com.margelo.nitro.camera.hybrids.inputs
+ 
+ import android.annotation.SuppressLint
+ import android.hardware.camera2.CameraCharacteristics
++import android.hardware.camera2.CameraMetadata
+ import android.os.Build
+ import androidx.annotation.OptIn
+ import androidx.camera.camera2.adapter.CameraInfoAdapter.Companion.cameraId
+@@ -129,16 +130,43 @@ class HybridCameraDevice(
+   override val supportsWhiteBalanceMetering: Boolean
+     get() = cameraInfo.isFocusMeteringSupported(createDummyMeteringAction(FocusMeteringAction.FLAG_AWB))
+ 
+-  // TODO: CameraX doesn't support manual Focus/Exposure/WB locking...
++  // TODO: CameraX doesn't support manual Focus locking...
+   override val supportsFocusLocking: Boolean
+     get() = false
++
++  // PATCH CamaraProAng: CameraX no expone ISO/velocidad/WB manuales por su
++  // API pública, pero sí es posible por debajo con Camera2Interop
++  // (`Camera2CameraControl.setCaptureRequestOptions`, ver
++  // `HybridCameraController.setExposureLocked`/`setWhiteBalanceLocked`).
++  // Estos dos ya no son "false" fijo: reflejan si el sensor real admite
++  // `CONTROL_AE_MODE_OFF`/`CONTROL_AWB_MODE_OFF`, que es lo que ese camino
++  // necesita para funcionar.
++  @OptIn(ExperimentalCamera2Interop::class)
+   override val supportsExposureLocking: Boolean
+-    get() = false
++    get() {
++      val isoRange = camera2Info?.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
++      val durationRange = camera2Info?.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
++      val aeModes = camera2Info?.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES)
++      return isoRange != null &&
++        durationRange != null &&
++        aeModes?.contains(CameraMetadata.CONTROL_AE_MODE_OFF) == true
++    }
++
++  @OptIn(ExperimentalCamera2Interop::class)
+   override val supportsWhiteBalanceLocking: Boolean
+-    get() = false
++    get() {
++      val awbModes = camera2Info?.getCameraCharacteristic(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES)
++      return awbModes?.contains(CameraMetadata.CONTROL_AWB_MODE_OFF) == true
++    }
+ 
++  // No existe una característica de Camera2 que informe un "máximo" de
++  // ganancia de balance de blancos: `RggbChannelVector` acepta cualquier
++  // float positivo, pero valores fuera de ~1×...4× no aportan nada útil en
++  // ningún sensor real (source: rango que usan los propios ejemplos de
++  // Camera2 de Google para RggbChannelVector). Es una cota práctica, no una
++  // medida del dispositivo.
+   override val maxWhiteBalanceGain: Double
+-    get() = 0.0
++    get() = if (supportsWhiteBalanceLocking) 4.0 else 0.0
+ 
+   override val supportsExposureBias: Boolean
+     get() = cameraInfo.exposureState.isExposureCompensationSupported
+diff --git a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/outputs/HybridPreviewOutput.kt b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/outputs/HybridPreviewOutput.kt
+index a152983..8ecac9f 100644
+--- a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/outputs/HybridPreviewOutput.kt
++++ b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/hybrids/outputs/HybridPreviewOutput.kt
+@@ -1,7 +1,12 @@
+ package com.margelo.nitro.camera.hybrids.outputs
+ 
++import android.hardware.camera2.CameraCaptureSession
++import android.hardware.camera2.CaptureRequest
++import android.hardware.camera2.TotalCaptureResult
+ import android.util.Log
+ import androidx.annotation.OptIn
++import androidx.camera.camera2.interop.Camera2Interop
++import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+ import androidx.camera.core.ExperimentalMirrorMode
+ import androidx.camera.core.Preview
+ import com.margelo.nitro.camera.CameraOrientation
+@@ -12,6 +17,7 @@ import com.margelo.nitro.camera.Size
+ import com.margelo.nitro.camera.TargetStabilizationMode
+ import com.margelo.nitro.camera.extensions.converters.toMirrorMode
+ import com.margelo.nitro.camera.extensions.converters.toSize
++import com.margelo.nitro.camera.hybrids.LiveCameraCaptureState
+ import com.margelo.nitro.camera.public.NativeCameraOutput
+ import com.margelo.nitro.camera.public.NativePreviewOutput
+ 
+@@ -19,6 +25,11 @@ class HybridPreviewOutput :
+   HybridCameraPreviewOutputSpec(),
+   NativeCameraOutput,
+   NativePreviewOutput {
++  companion object {
++    /** Ver el comentario junto a `setSessionCaptureCallback` más abajo. */
++    private const val UPDATE_EVERY_N_FRAMES = 6
++  }
++
+   override val mediaType: MediaType = MediaType.VIDEO
+   override var outputOrientation: CameraOrientation
+     get() = CameraOrientation.UP
+@@ -45,11 +56,16 @@ class HybridPreviewOutput :
+     }
+   }
+ 
+-  @OptIn(ExperimentalMirrorMode::class)
++  @OptIn(ExperimentalMirrorMode::class, ExperimentalCamera2Interop::class)
+   override fun createUseCase(
+     mirrorMode: MirrorMode,
+     config: NativeCameraOutput.Config,
+   ): NativeCameraOutput.PreparedUseCase {
++    // PATCH CamaraProAng: se reinicia antes de que lleguen resultados del
++    // `Preview` nuevo — si venía de otra cámara (frontal/trasera), sus
++    // valores ya no significan nada aquí.
++    LiveCameraCaptureState.reset()
++
+     val preview =
+       Preview
+         .Builder()
+@@ -71,6 +87,36 @@ class HybridPreviewOutput :
+               setPreviewStabilizationEnabled(true)
+             }
+           }
++
++          // PATCH CamaraProAng: única forma de leer en vivo lo que el 3A
++          // automático está aplicando de verdad (ISO/velocidad/WB) — no hay
++          // API pública de CameraX para esto, hay que bajar a Camera2Interop
++          // y engancharlo al construir el `UseCase`, no se puede añadir
++          // después sobre uno ya vinculado. Ver `LiveCameraCaptureState`.
++          //
++          // Se actualiza cada `UPDATE_EVERY_N_FRAMES` fotogramas, no en
++          // cada uno: a ~30 fps eso es una vez cada ~200 ms, de sobra de
++          // fresco para un valor que sólo se lee al abrir la pestaña de
++          // ISO/S/WB — pero se ejecuta todo el rato que el visor está
++          // abierto, en cualquier modo, así que actualizar en cada
++          // fotograma era gastar de más sin que nadie fuera a notar la
++          // diferencia de frescura.
++          var frameCounter = 0
++          Camera2Interop.Extender(this).setSessionCaptureCallback(
++            object : CameraCaptureSession.CaptureCallback() {
++              override fun onCaptureCompleted(
++                session: CameraCaptureSession,
++                request: CaptureRequest,
++                result: TotalCaptureResult,
++              ) {
++                frameCounter += 1
++                if (frameCounter % UPDATE_EVERY_N_FRAMES != 0) {
++                  return
++                }
++                LiveCameraCaptureState.update(result)
++              }
++            },
++          )
+         }.build()
+ 
+     return NativeCameraOutput.PreparedUseCase(preview) {

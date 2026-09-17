@@ -10,6 +10,7 @@ import type {
   HdrKind,
   TimerKind,
 } from '@/features/camera/constants/guides';
+import type { WhiteBalanceGains } from '@/features/camera/constants/manualControls';
 import type { CameraMode } from '@/features/camera/constants/modes';
 import type { VideoQualityKind } from '@/features/camera/constants/videoQuality';
 import { StorageKeys } from '@/services/storage';
@@ -95,6 +96,24 @@ type CameraSession = {
    * cada escena pide el suyo.
    */
   ev: number;
+  /**
+   * ISO y velocidad de obturación manuales, o `null` en automático.
+   *
+   * Van juntos y no por separado: Camera2 los liga al mismo
+   * `CONTROL_AE_MODE_OFF` (ver `manualControls.ts`), así que no existe un
+   * estado «ISO manual, velocidad automática» en Android.
+   */
+  manualExposure: { iso: number; shutterSeconds: number } | null;
+  /**
+   * Balance de blancos manual, o `null` en automático.
+   *
+   * No es un Kelvin absoluto: `shift` es un ajuste cálido/frío -4..+4
+   * relativo a `baseGains`, las ganancias reales que el automático tenía en
+   * el instante de activar manual — ver el porqué en `manualControls.ts`
+   * (`applyWhiteBalanceShift`). Con `shift = 0` el resultado es exactamente
+   * `baseGains`, así que activar manual nunca cambia la imagen por sí solo.
+   */
+  manualWhiteBalance: { shift: number; baseGains: WhiteBalanceGains } | null;
   /** Foto usada como superposición fantasma, o null. */
   ghostUri: string | null;
   ghostOpacity: number;
@@ -119,6 +138,12 @@ type CameraActions = {
   toggleFacing: () => void;
   setZoom: (zoom: number) => void;
   setEv: (ev: number) => void;
+  setManualExposure: (iso: number, shutterSeconds: number) => void;
+  disableManualExposure: () => void;
+  /** Activa manual capturando `baseGains` — ver `CameraSession.manualWhiteBalance`. */
+  enableManualWhiteBalance: (baseGains: WhiteBalanceGains) => void;
+  setManualWhiteBalanceShift: (shift: number) => void;
+  disableManualWhiteBalance: () => void;
   setGhost: (uri: string | null) => void;
   setGhostOpacity: (opacity: number) => void;
   setLastPhoto: (uri: string) => void;
@@ -143,6 +168,8 @@ const initialSession: CameraSession = {
   facing: 'back',
   zoom: 1,
   ev: 0,
+  manualExposure: null,
+  manualWhiteBalance: null,
   ghostUri: null,
   ghostOpacity: 0.4,
   lastPhotoUri: null,
@@ -193,11 +220,28 @@ export const useCameraStore = create<
           facing: state.facing === 'back' ? 'front' : 'back',
           zoom: 1,
           ev: 0,
+          // El rango de ISO/velocidad/WB de la cámara nueva no es el de la
+          // anterior: un valor manual que allí tenía sentido aquí podría
+          // caer fuera de rango.
+          manualExposure: null,
+          manualWhiteBalance: null,
         })),
       setZoom: zoom => set({ zoom: clampZoom(zoom) }),
       // Redondeado aquí también, no sólo en el control: el EV siempre va en
       // pasos enteros de -4 a +4.
       setEv: ev => set({ ev: Math.round(ev) }),
+      setManualExposure: (iso, shutterSeconds) =>
+        set({ manualExposure: { iso, shutterSeconds } }),
+      disableManualExposure: () => set({ manualExposure: null }),
+      enableManualWhiteBalance: baseGains =>
+        set({ manualWhiteBalance: { shift: 0, baseGains } }),
+      setManualWhiteBalanceShift: shift =>
+        set(state =>
+          state.manualWhiteBalance == null
+            ? {}
+            : { manualWhiteBalance: { ...state.manualWhiteBalance, shift } },
+        ),
+      disableManualWhiteBalance: () => set({ manualWhiteBalance: null }),
       setGhost: uri => set({ ghostUri: uri }),
       setGhostOpacity: opacity => set({ ghostOpacity: clamp01(opacity) }),
       setLastPhoto: uri => set({ lastPhotoUri: uri }),

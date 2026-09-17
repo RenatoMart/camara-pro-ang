@@ -16,7 +16,12 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CommonResolutions, useCameraDevice } from 'react-native-vision-camera';
+import {
+  CommonResolutions,
+  useCameraDevice,
+  useCameraDeviceExtensions,
+  type Size,
+} from 'react-native-vision-camera';
 
 import { Button } from '@/components/ui/Button';
 import { Text } from '@/components/ui/Text';
@@ -38,13 +43,21 @@ import {
 } from '../components/controls/ZoomIndicator';
 import { Glyph } from '../components/Glyph';
 import { AspectMask, useAspectInsets } from '../components/overlays/AspectMask';
+import { CaptureFrameCorners } from '../components/overlays/CaptureFrameCorners';
 import { GhostOverlay } from '../components/overlays/GhostOverlay';
 import { GuideOverlay } from '../components/overlays/GuideOverlay';
 import { LevelIndicator } from '../components/overlays/LevelIndicator';
 import { RecordingTimer } from '../components/overlays/RecordingTimer';
 import { ProPanel } from '../components/panels/ProPanel';
 import { ProPanelHandle } from '../components/panels/ProPanelHandle';
-import type { ManualControlKind } from '../constants/manualControls';
+import {
+  applyWhiteBalanceShift,
+  defaultIso,
+  defaultShutterSeconds,
+  type ExposureRange,
+  type ManualControlKind,
+  type WhiteBalanceGains,
+} from '../constants/manualControls';
 import { VIDEO_QUALITIES } from '../constants/videoQuality';
 import { useAutoShutter } from '../hooks/useAutoShutter';
 import { useCameraPermission } from '../hooks/useCameraPermission';
@@ -57,6 +70,13 @@ import {
   bestSupportedVideoQuality,
   supportedVideoQualities,
 } from '../utils/videoCapabilities';
+
+/** Sin lectura en vivo del automático, punto de partida neutro: sin corrección de color. */
+const NEUTRAL_WHITE_BALANCE_GAINS: WhiteBalanceGains = {
+  redGain: 1,
+  blueGain: 1,
+  greenGain: 1,
+};
 
 /**
  * Pantalla del visor.
@@ -89,6 +109,21 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
   const setZoom = useCameraStore(state => state.setZoom);
   const ev = useCameraStore(state => state.ev);
   const setEv = useCameraStore(state => state.setEv);
+  const manualExposure = useCameraStore(state => state.manualExposure);
+  const setManualExposure = useCameraStore(state => state.setManualExposure);
+  const disableManualExposure = useCameraStore(
+    state => state.disableManualExposure,
+  );
+  const manualWhiteBalance = useCameraStore(state => state.manualWhiteBalance);
+  const enableManualWhiteBalance = useCameraStore(
+    state => state.enableManualWhiteBalance,
+  );
+  const setManualWhiteBalanceShift = useCameraStore(
+    state => state.setManualWhiteBalanceShift,
+  );
+  const disableManualWhiteBalance = useCameraStore(
+    state => state.disableManualWhiteBalance,
+  );
   const mode = useCameraStore(state => state.mode);
   const videoQualityPref = useCameraStore(state => state.videoQuality);
   const setVideoQuality = useCameraStore(state => state.setVideoQuality);
@@ -104,9 +139,39 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
   // (`minZoom`/`maxZoom`) también hacen falta arriba, para el indicador.
   const device = useCameraDevice(facing);
 
+  // Detecta si el sensor conectado reporta de verdad un modo retrato
+  // (extensión de fábrica "bokeh" de CameraX) — no es una suposición, es la
+  // misma consulta que haría cualquier app: `ExtensionsManager` pregunta al
+  // HAL del fabricante. `undefined` mientras se resuelve.
+  const deviceExtensions = useCameraDeviceExtensions(device);
+  const supportsPortraitExtension =
+    deviceExtensions?.some(extension => extension.type === 'bokeh') ?? false;
+
   const isProMode = mode === 'pro';
   const isVideoMode = mode === 'video';
+  const isUltraHdMode = mode === 'ultraHd';
   const isFocused = useIsFocused();
+
+  // La foto normal usa el preset genérico de `usePhotoOutput`
+  // (`CommonResolutions.UHD_4_3`); Ultra HD pide en cambio el tamaño real
+  // más grande que reporta el sensor, que en teléfonos con más megapíxeles
+  // supera a ese preset.
+  const maxPhotoResolution = useMemo(() => {
+    if (device == null) {
+      return undefined;
+    }
+    const resolutions = device.getSupportedResolutions('photo');
+    return resolutions.reduce<Size | undefined>((best, candidate) => {
+      if (
+        best == null ||
+        candidate.width * candidate.height > best.width * best.height
+      ) {
+        return candidate;
+      }
+      return best;
+    }, undefined);
+  }, [device]);
+  const photoResolution = isUltraHdMode ? maxPhotoResolution : undefined;
 
   // Qué calidades admite de verdad el sensor: 720p/1080p/4K, las que traiga
   // el teléfono. Si la preferencia guardada no está entre ellas (el sensor
@@ -188,10 +253,6 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
   }, [isProMode]);
   const collapseProPanel = useCallback(() => setProPanelOpen(false), []);
   const expandProPanel = useCallback(() => setProPanelOpen(true), []);
-  // Sólo tiene efecto tocar el visor mientras hay algo que ocultar; el resto
-  // del tiempo el toque no hace nada (deja sitio a un futuro tap-to-focus).
-  const onViewportTap =
-    isProMode && proPanelOpen ? collapseProPanel : undefined;
 
   // EV/S/ISO/WB/F: cuál está desplegado, si es que hay alguno. Sustituye a
   // la tira de modos mientras dura, igual que se oculta el resto al salir de
@@ -207,11 +268,211 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
     setActiveManualControl(current => (current === kind ? null : kind));
   }, []);
 
+  // Tocar el visor cierra lo que esté desplegado encima de él: primero el
+  // control manual (para recuperar FOTO/VIDEO/PRO…), si no hay ninguno
+  // abierto entonces la bandeja PRO. Antes hacía falta volver a tocar el
+  // mismo icono de ISO/EV/etc. para cerrarlo, lo que dejaba sin forma de
+  // cambiar de modo sin ese paso de más.
+  //
+  // Devuelve si el toque ya hizo algo: `CameraViewport` lo usa para no
+  // enfocar también a la vez que cierra un menú — son dos intenciones
+  // distintas y mezclarlas confunde.
+  const onViewportTap = useCallback((): boolean => {
+    if (activeManualControl !== null) {
+      setActiveManualControl(null);
+      return true;
+    }
+    if (isProMode && proPanelOpen) {
+      collapseProPanel();
+      return true;
+    }
+    return false;
+  }, [activeManualControl, isProMode, proPanelOpen, collapseProPanel]);
+
   const onEvChange = useCallback(
     (next: number) => {
       setEv(next);
     },
     [setEv],
+  );
+
+  // Rango real de ISO/velocidad y si el sensor admite balance de blancos
+  // manual: llegan de `CameraViewport` en cuanto la sesión arranca (antes no
+  // existen). Se guardan en `useState`, no en la store: son una propiedad
+  // del sensor conectado ahora mismo, no una preferencia ni estado de
+  // sesión que otra pantalla necesite leer.
+  const [exposureRange, setExposureRange] = useState<ExposureRange | null>(
+    null,
+  );
+  const [whiteBalanceSupported, setWhiteBalanceSupported] = useState(false);
+
+  // Lo que el automático está aplicando justo al abrir la pestaña de ISO/S,
+  // para que la regla arranque mostrando lo mismo que ya se veía en el
+  // visor. Sin esto enseñaba un valor inventado (ISO 400…) que nunca
+  // coincidía con lo que de verdad estaba pasando en automático. El WB no
+  // necesita esto: al ser un ajuste relativo (ver `manualControls.ts`),
+  // «0» siempre significa «como está el automático ahora mismo», así que
+  // la lectura en vivo sólo hace falta en el momento de capturar
+  // `baseGains` — eso lo leen directo `onToggleManualWhiteBalance`/
+  // `onWhiteBalanceShiftChange`, no hace falta guardarlo aquí.
+  const [livePreview, setLivePreview] = useState<{
+    exposure: { iso: number; shutterSeconds: number } | null;
+  }>({ exposure: null });
+  useEffect(() => {
+    if (activeManualControl === 'iso' || activeManualControl === 's') {
+      setLivePreview(current => ({
+        ...current,
+        exposure: cameraRef.current?.readLiveExposure() ?? current.exposure,
+      }));
+    }
+    // `facing` sólo dispara el refresco (cambiar de cámara invalida la
+    // lectura anterior); no participa en qué se lee.
+  }, [activeManualControl, facing, cameraRef]);
+
+  const maxWhiteBalanceGain = device?.maxWhiteBalanceGain ?? 0;
+
+  // Volver a automático es un único `resetFocus()` nativo que deshace
+  // exposición y balance de blancos manuales a la vez (así lo documenta la
+  // interfaz de VisionCamera): no hay una versión que sólo suelte uno de
+  // los dos, así que apagar cualquiera de los dos apaga ambos.
+  const onToggleManualExposure = useCallback(() => {
+    if (manualExposure != null) {
+      disableManualExposure();
+      disableManualWhiteBalance();
+      void cameraRef.current?.resetManualControls();
+      return;
+    }
+    if (exposureRange == null) {
+      return;
+    }
+    const live = cameraRef.current?.readLiveExposure();
+    const iso =
+      live != null
+        ? Math.min(
+            Math.max(live.iso, exposureRange.minIso),
+            exposureRange.maxIso,
+          )
+        : defaultIso(exposureRange);
+    const shutterSeconds =
+      live != null
+        ? Math.min(
+            Math.max(live.shutterSeconds, exposureRange.minShutterSeconds),
+            exposureRange.maxShutterSeconds,
+          )
+        : defaultShutterSeconds(exposureRange);
+    setManualExposure(iso, shutterSeconds);
+    void cameraRef.current?.setManualExposure(iso, shutterSeconds);
+  }, [
+    manualExposure,
+    exposureRange,
+    disableManualExposure,
+    disableManualWhiteBalance,
+    setManualExposure,
+    cameraRef,
+  ]);
+
+  // Tocar la propia regla activa manual directamente: no hace falta pasar
+  // antes por el círculo «A». El parámetro tocado coge el valor arrastrado;
+  // el otro (velocidad si se tocó ISO, o viceversa — van juntos, ver
+  // `manualControls.ts`) se queda en lo que el automático estuviera
+  // aplicando en ese instante, no en un valor por defecto.
+  const onIsoChange = useCallback(
+    (iso: number) => {
+      if (manualExposure != null) {
+        setManualExposure(iso, manualExposure.shutterSeconds);
+        void cameraRef.current?.setManualExposure(
+          iso,
+          manualExposure.shutterSeconds,
+        );
+        return;
+      }
+      if (exposureRange == null) {
+        return;
+      }
+      const shutterSeconds =
+        cameraRef.current?.readLiveExposure()?.shutterSeconds ??
+        defaultShutterSeconds(exposureRange);
+      setManualExposure(iso, shutterSeconds);
+      void cameraRef.current?.setManualExposure(iso, shutterSeconds);
+    },
+    [manualExposure, exposureRange, setManualExposure, cameraRef],
+  );
+
+  const onShutterChange = useCallback(
+    (shutterSeconds: number) => {
+      if (manualExposure != null) {
+        setManualExposure(manualExposure.iso, shutterSeconds);
+        void cameraRef.current?.setManualExposure(
+          manualExposure.iso,
+          shutterSeconds,
+        );
+        return;
+      }
+      if (exposureRange == null) {
+        return;
+      }
+      const iso =
+        cameraRef.current?.readLiveExposure()?.iso ?? defaultIso(exposureRange);
+      setManualExposure(iso, shutterSeconds);
+      void cameraRef.current?.setManualExposure(iso, shutterSeconds);
+    },
+    [manualExposure, exposureRange, setManualExposure, cameraRef],
+  );
+
+  const onToggleManualWhiteBalance = useCallback(() => {
+    if (manualWhiteBalance != null) {
+      disableManualWhiteBalance();
+      disableManualExposure();
+      void cameraRef.current?.resetManualControls();
+      return;
+    }
+    if (!whiteBalanceSupported) {
+      return;
+    }
+    // `shift` arranca en 0: `enableManualWhiteBalance` ya aplica esas
+    // ganancias tal cual, así que activar manual no cambia la imagen.
+    const baseGains =
+      cameraRef.current?.readLiveWhiteBalanceGains() ??
+      NEUTRAL_WHITE_BALANCE_GAINS;
+    enableManualWhiteBalance(baseGains);
+    void cameraRef.current?.setManualWhiteBalance(baseGains);
+  }, [
+    manualWhiteBalance,
+    whiteBalanceSupported,
+    disableManualWhiteBalance,
+    disableManualExposure,
+    enableManualWhiteBalance,
+    cameraRef,
+  ]);
+
+  // Igual que `onIsoChange`/`onShutterChange`: tocar la regla activa manual
+  // sin pasar antes por el círculo «A». El desplazamiento parte siempre de
+  // las ganancias base capturadas al activar manual (o de una lectura en
+  // vivo si aún no se había activado), nunca de un Kelvin absoluto.
+  const onWhiteBalanceShiftChange = useCallback(
+    (shift: number) => {
+      const baseGains =
+        manualWhiteBalance?.baseGains ??
+        cameraRef.current?.readLiveWhiteBalanceGains() ??
+        NEUTRAL_WHITE_BALANCE_GAINS;
+      if (manualWhiteBalance == null) {
+        enableManualWhiteBalance(baseGains);
+      }
+      setManualWhiteBalanceShift(shift);
+      const gains = applyWhiteBalanceShift(
+        baseGains,
+        shift,
+        maxWhiteBalanceGain,
+      );
+      void cameraRef.current?.setManualWhiteBalance(gains);
+    },
+    [
+      manualWhiteBalance,
+      maxWhiteBalanceGain,
+      enableManualWhiteBalance,
+      setManualWhiteBalanceShift,
+      cameraRef,
+    ],
   );
 
   // Altura real de la bandeja inferior (guías/modos/disparador), para que el
@@ -333,7 +594,10 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
             ev={ev}
             onTap={onViewportTap}
             cameraRef={cameraRef}
+            onExposureRangeChange={setExposureRange}
+            onWhiteBalanceSupportedChange={setWhiteBalanceSupported}
             compositionFrameOutput={compositionFrameOutput}
+            photoResolution={photoResolution}
             isVideoMode={isVideoMode}
             videoResolution={videoResolution}
             enableAudio={micPermission.status === 'concedido'}
@@ -391,6 +655,7 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
             },
           ]}
         >
+          <CaptureFrameCorners width={visibleWidth} height={visibleHeight} />
           {isProMode ? (
             <GuideOverlay
               kind={guide}
@@ -495,9 +760,25 @@ export function CameraScreen({ navigation }: RootScreenProps<'Camara'>) {
             ev={ev}
             onEvChange={onEvChange}
             lensAperture={device?.lensAperture ?? null}
+            exposureRange={exposureRange}
+            manualExposure={manualExposure}
+            liveExposurePreview={livePreview.exposure}
+            onToggleManualExposure={onToggleManualExposure}
+            onIsoChange={onIsoChange}
+            onShutterChange={onShutterChange}
+            whiteBalanceSupported={whiteBalanceSupported}
+            manualWhiteBalance={manualWhiteBalance}
+            onToggleManualWhiteBalance={onToggleManualWhiteBalance}
+            onWhiteBalanceShiftChange={onWhiteBalanceShiftChange}
           />
         ) : (
-          <ModeSelector />
+          <ModeSelector
+            avisoOverrides={{
+              retrato: supportsPortraitExtension
+                ? 'Tu cámara sí tiene modo retrato de fábrica, pero conectarlo aquí es un cambio grande — pregúntame si quieres que lo encaremos.'
+                : 'Esta cámara no reporta modo retrato de fábrica.',
+            }}
+          />
         )}
 
         <View style={styles.mainBar}>

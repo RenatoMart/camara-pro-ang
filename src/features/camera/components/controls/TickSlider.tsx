@@ -62,15 +62,29 @@ export const TickSlider = memo(function TickSliderBase({
   const dragValue = useSharedValue(value);
   const isDragging = useRef(false);
   const updateTick = useSharedValue(0);
+  /**
+   * Último valor que de verdad se avisó a `onChange`. Al pegar el dedo
+   * contra un extremo, el gesto sigue disparando eventos con el mismo
+   * `snapped` repetido — sin este freno se llamaba a `onChange` igual cada
+   * pocos eventos, y en el caso de ISO/velocidad cada llamada nueva cancela
+   * la anterior en la cámara (`OperationCanceledException`), disparando una
+   * ráfaga de errores por quedarse pegado al límite.
+   */
+  const lastEmitted = useSharedValue(value);
 
   // Mientras no se está arrastrando, el indicador sigue al valor real (por
   // ejemplo si algo externo lo cambia); durante el arrastre manda el propio
   // gesto, igual que el zoom con `isPinching`.
   useEffect(() => {
     if (!isDragging.current) {
-      dragValue.value = clamp(value, min, max);
+      const clamped = clamp(value, min, max);
+      dragValue.value = clamped;
+      // Nuevo punto de partida: un cambio externo (p. ej. volver a
+      // automático y luego a un valor por defecto distinto) no debe quedar
+      // bloqueado por el freno de "no repetir" de un arrastre anterior.
+      lastEmitted.value = clamped;
     }
-  }, [value, min, max, dragValue]);
+  }, [value, min, max, dragValue, lastEmitted]);
 
   const onTrackLayout = useCallback(
     (event: LayoutChangeEvent) => {
@@ -105,12 +119,16 @@ export const TickSlider = memo(function TickSliderBase({
       dragValue.value = snapped;
 
       updateTick.value += 1;
-      if (updateTick.value % 3 === 0) {
+      if (updateTick.value % 3 === 0 && snapped !== lastEmitted.value) {
+        lastEmitted.value = snapped;
         runOnJS(emitChange)(snapped);
       }
     })
     .onEnd(() => {
-      runOnJS(emitChange)(dragValue.value);
+      if (dragValue.value !== lastEmitted.value) {
+        lastEmitted.value = dragValue.value;
+        runOnJS(emitChange)(dragValue.value);
+      }
       runOnJS(setDragging)(false);
     });
 

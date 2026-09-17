@@ -13,6 +13,9 @@ describe('useCameraStore', () => {
       autoShutter: false,
       facing: 'back',
       zoom: 1,
+      ev: 0,
+      manualExposure: null,
+      manualWhiteBalance: null,
       ghostUri: null,
       ghostOpacity: 0.4,
       lastPhotoUri: null,
@@ -90,6 +93,62 @@ describe('useCameraStore', () => {
     const sinAuto = useCameraStore.getState();
     expect(sinAuto.autoShutter).toBe(false);
     expect(sinAuto.levelOn).toBe(true);
+  });
+
+  it('fija y quita la exposición manual (ISO + velocidad juntos)', () => {
+    useCameraStore.getState().setManualExposure(400, 1 / 125);
+    expect(useCameraStore.getState().manualExposure).toEqual({
+      iso: 400,
+      shutterSeconds: 1 / 125,
+    });
+
+    useCameraStore.getState().disableManualExposure();
+    expect(useCameraStore.getState().manualExposure).toBeNull();
+  });
+
+  it('activa el balance de blancos manual capturando las ganancias base', () => {
+    const baseGains = { redGain: 1.8, blueGain: 2.2, greenGain: 1.0 };
+    useCameraStore.getState().enableManualWhiteBalance(baseGains);
+    expect(useCameraStore.getState().manualWhiteBalance).toEqual({
+      shift: 0,
+      baseGains,
+    });
+
+    useCameraStore.getState().disableManualWhiteBalance();
+    expect(useCameraStore.getState().manualWhiteBalance).toBeNull();
+  });
+
+  it('ajustar el shift no toca las ganancias base capturadas', () => {
+    const baseGains = { redGain: 1.8, blueGain: 2.2, greenGain: 1.0 };
+    useCameraStore.getState().enableManualWhiteBalance(baseGains);
+    useCameraStore.getState().setManualWhiteBalanceShift(2);
+
+    expect(useCameraStore.getState().manualWhiteBalance).toEqual({
+      shift: 2,
+      baseGains,
+    });
+  });
+
+  it('ajustar el shift sin estar en manual no hace nada', () => {
+    useCameraStore.getState().setManualWhiteBalanceShift(2);
+    expect(useCameraStore.getState().manualWhiteBalance).toBeNull();
+  });
+
+  it('alternar cámara también resetea la exposición y el balance manual', () => {
+    useCameraStore.getState().setManualExposure(400, 1 / 125);
+    useCameraStore
+      .getState()
+      .enableManualWhiteBalance({
+        redGain: 1.8,
+        blueGain: 2.2,
+        greenGain: 1.0,
+      });
+
+    useCameraStore.getState().toggleFacing();
+
+    const next = useCameraStore.getState();
+    expect(next.manualExposure).toBeNull();
+    expect(next.manualWhiteBalance).toBeNull();
   });
 
   it('guarda la última foto y el fantasma', () => {

@@ -28,10 +28,9 @@ export type GuideKind =
 /**
  * Una guía del panel PRO.
  *
- * `sugerible` marca si el asistente puede proponerla solo. Las guías que el
- * modelo no sabe reconocer (porque su clase no llegó a entrenarse, ver
- * `ai/constants/compositionClasses.ts`) siguen estando disponibles a mano:
- * simplemente nunca se encienden en automático.
+ * `sugerible` marca si el asistente puede proponerla solo. Sirve para las
+ * guías que no vienen de ninguna clase del modelo (`ninguna`, `cuadricula`):
+ * sólo se eligen a mano, porque no hay señal que las dispare en automático.
  */
 export type Guide = {
   kind: GuideKind;
@@ -53,9 +52,8 @@ export const GUIDES: ReadonlyArray<Guide> = [
   { kind: 'curva', label: 'Curva en S', sugerible: true },
   { kind: 'centro', label: 'Centro', sugerible: true },
   { kind: 'patron', label: 'Patrón', sugerible: true },
-  // Sin entrenar: su clase no tiene ejemplos, así que sólo se elige a mano.
-  { kind: 'fuga', label: 'Punto de fuga', sugerible: false },
-  { kind: 'aire', label: 'Aire', sugerible: false },
+  { kind: 'fuga', label: 'Punto de fuga', sugerible: true },
+  { kind: 'aire', label: 'Aire', sugerible: true },
 ];
 
 /** Cómo se decide la guía que se dibuja. */
