@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
-import { env } from '@/config/env';
 import { useSettingsStore, type ThemePreference } from '@/store/settingsStore';
 import { makeStyles } from '@/theme';
 
@@ -68,11 +67,8 @@ export function SettingsScreen() {
       </Card>
 
       <Card>
-        <Text variant="overline" color="textSecondary">
-          Entorno
-        </Text>
         <Text variant="caption" color="textSecondary">
-          {env.appEnv} · {env.apiUrl}
+          Dedicado a una persona muy especial, A.M.C.Q.
         </Text>
       </Card>
     </Screen>

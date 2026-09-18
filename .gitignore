@@ -66,6 +66,9 @@ yarn-error.log
 # testing
 /coverage
 
+# APKs de release para uso propio (se generan con npm run android:release)
+/releases/*.apk
+
 # Variables de entorno: se comparte la plantilla, nunca los valores reales
 .env
 .env.*

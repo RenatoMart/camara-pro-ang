@@ -192,6 +192,11 @@ bundle en `assets/index.android.bundle`:
 npm run android:release
 ```
 
+El APK queda en `android/app/build/outputs/apk/release/app-release.apk`. Para
+tenerlo a mano sin bucear en `build/` (que se limpia con `clean:android`),
+cópialo a `releases/` en la raíz del proyecto — esa carpeta está en
+`.gitignore` porque el binario no se commitea.
+
 - `android/app/build.gradle` apunta `entryFile` a `index.ts`. El plugin de
   React Native asume `index.js`, y sin esa línea la build de release falla al
   generar el bundle. En debug no se nota, porque el bundle lo resuelve Metro.
